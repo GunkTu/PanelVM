@@ -514,7 +514,7 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
         },
         (log) =>
           withVm(ctx, vm, async (lease) => {
-            log(`Arsip ${q.filename} (${Math.round(received / 1024)} KB) diterima.\n`);
+            log(`Arsip ${q.filename} (${received.toLocaleString('en-US')} byte) diterima.\n`);
             try {
               await runDeploy(
                 vm,

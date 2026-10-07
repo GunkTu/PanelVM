@@ -8,6 +8,10 @@ import { LoginPage } from './features/auth/LoginPage';
 import { SetupTwoFactorPage } from './features/auth/SetupTwoFactorPage';
 import { TwoFactorPage } from './features/auth/TwoFactorPage';
 import { AppLayout } from './features/layout/AppLayout';
+import { DatabasesPage } from './features/databases/DatabasesPage';
+import { FilesPage } from './features/files/FilesPage';
+import { SitesPage } from './features/sites/SitesPage';
+import { SoftwarePage } from './features/software/SoftwarePage';
 import { VmListPage } from './features/vms/VmListPage';
 
 // xterm cukup besar; muat hanya saat halaman terminal dibuka.
@@ -38,6 +42,10 @@ export function App() {
             </Suspense>
           }
         />
+        <Route path="/vms/:vmId/files" element={<FilesPage />} />
+        <Route path="/vms/:vmId/databases" element={<DatabasesPage />} />
+        <Route path="/vms/:vmId/software" element={<SoftwarePage />} />
+        <Route path="/vms/:vmId/sites" element={<SitesPage />} />
         <Route
           path="/admin/vms"
           element={

@@ -15,7 +15,7 @@ export interface ConfirmDialogProps {
   onCancel: () => void;
 }
 
-export function ConfirmDialog({
+function ConfirmBody({
   open,
   title,
   message,
@@ -62,4 +62,9 @@ export function ConfirmDialog({
       )}
     </Modal>
   );
+}
+
+/** Dipasang hanya saat terbuka sehingga isian konfirmasi selalu mulai kosong. */
+export function ConfirmDialog(props: ConfirmDialogProps) {
+  return props.open ? <ConfirmBody {...props} /> : null;
 }

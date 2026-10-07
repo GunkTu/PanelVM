@@ -22,6 +22,8 @@ export interface Modules {
   database: boolean;
   monitoring: boolean;
   services: boolean;
+  software: boolean;
+  sites: boolean;
 }
 
 export interface Vm {
@@ -62,4 +64,32 @@ export interface AuditItem {
   target: string | null;
   result: string;
   meta: string | null;
+}
+
+export interface FileEntry {
+  name: string;
+  type: 'dir' | 'file' | 'link' | 'other';
+  isLink: boolean;
+  size: number;
+  mode: string;
+  mtime: number;
+  uid: number;
+  gid: number;
+}
+
+export interface Job {
+  id: string;
+  kind: string;
+  title: string;
+  status: 'running' | 'succeeded' | 'failed';
+  log?: string;
+  createdAt: number;
+  finishedAt: number | null;
+}
+
+export interface Credentials {
+  user: string;
+  password: string;
+  database: string | null;
+  envSnippet: string;
 }

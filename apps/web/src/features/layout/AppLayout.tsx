@@ -120,11 +120,23 @@ export function AppLayout() {
           <NavLink to="/vms" className={navClass} end>
             VM Saya
           </NavLink>
-          {vmId && vm.data?.modules.terminal && (
-            <NavLink to={`/vms/${vmId}/terminal`} className={navClass}>
-              Terminal
-            </NavLink>
-          )}
+          {vmId &&
+            vm.data &&
+            (
+              [
+                ['terminal', 'Terminal', 'terminal'],
+                ['files', 'File Manager', 'files'],
+                ['database', 'Database', 'databases'],
+                ['software', 'Aplikasi', 'software'],
+                ['sites', 'Situs Web', 'sites'],
+              ] as const
+            )
+              .filter(([m]) => vm.data.modules[m])
+              .map(([m, text, path]) => (
+                <NavLink key={m} to={`/vms/${vmId}/${path}`} className={navClass}>
+                  {text}
+                </NavLink>
+              ))}
           {user.role === 'admin' && (
             <>
               <p className="mt-4 px-3 text-xs uppercase tracking-wide text-slate-400">Admin</p>

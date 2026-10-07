@@ -6,8 +6,9 @@ Daftar ini harus diverifikasi di lingkungan nyata. Bagian yang belum diuji ditan
 
 - Domain panel: `vm.thegt.my.id` (jadi `APP_ORIGIN=https://vm.thegt.my.id`).
 - IP publik tetap; trafik lewat router MikroTik (L2TP) menuju Nginx Proxy Manager.
-- SMTP: **belum ditentukan**. Email notifikasi (akun baru, login perangkat baru, VM offline) ditunda sampai SMTP dipilih. Notifikasi in-app sudah aktif.
-- Versi OS dan database tiap VM: **belum ditentukan**. Rencana: database diinstal dari panel (lihat "Instalasi database dari panel" di bawah).
+- SMTP: **tidak dipakai** (keputusan pemilik). Semua notifikasi lewat notification center di panel (akun baru, login perangkat baru, proses selesai/gagal, aksi berisiko). Variabel `SMTP_*` di `.env.example` boleh dikosongkan.
+- Retensi audit log: **90 hari** (bawaan), ubah lewat `AUDIT_RETENTION_DAYS` (minimal 7). Pembersihan jalan otomatis tiap hari. Job lama (30 hari) dan notifikasi terbaca (90 hari) juga dibersihkan.
+- Versi OS dan database tiap VM: **dideteksi panel** dari VM (tidak diasumsikan). Database dipasang dari panel lewat menu Aplikasi (lihat di bawah).
 
 ## Menjalankan panel (VM panel)
 
@@ -49,14 +50,48 @@ npm run start -w @panelvm/server
 Bila fingerprint berubah, koneksi ditolak sampai admin menyetujui ulang.
 Akses darurat tetap lewat Proxmox console bila kunci SSH panel terhapus oleh client.
 
-## Instalasi database dari panel (rencana Fase 2)
+## Aplikasi (installer ala cPanel)
 
-Permintaan pemilik: client bisa memasang database (MySQL/MariaDB/PostgreSQL) dari panel dengan versi pilihan. Rencana implementasi:
+Menu **Aplikasi** memasang software di VM dengan satu klik, dengan log berjalan langsung dan notifikasi saat selesai.
 
-- Panel mendeteksi OS VM (`/etc/os-release`) dan versi paket yang tersedia (`apt-cache policy`), lalu menampilkan pilihan yang benar-benar ada di repositori VM tersebut.
-- Instalasi memakai perintah apt berdaftar putih dengan nama paket dari daftar tetap (bukan input bebas), non-interaktif, dengan output ditampilkan ke pengguna.
-- Versi tertentu di luar repositori bawaan butuh repositori resmi vendor; ini keputusan tambahan yang perlu persetujuan karena menambah sumber paket.
-- Perilaku autentikasi root MySQL vs MariaDB berbeda per versi; hasil deteksi dicatat di sini setelah diuji di VM nyata.
+- Yang didukung: OS **Debian dan Ubuntu**. Panel membaca `/etc/os-release` dan tidak berasumsi.
+- Katalog tetap: alat dasar (unzip, zip, curl, git, rsync), Nginx, PHP-FPM (banyak versi berdampingan, ekstensi umum Laravel + opsional redis/imagick/soap/gmp/ldap bila tersedia), Composer (installer resmi dengan verifikasi checksum SHA-384), MariaDB, MySQL, PostgreSQL (versi dipilih dari yang ditemukan), Redis. Nama paket hanya dari daftar tetap atau template dengan versi yang divalidasi dan harus ada di repositori VM.
+- **Versi mengikuti repositori OS di VM.** Contoh: Ubuntu 24.04 menyediakan PHP 8.3 dan MariaDB 10.11 (terlihat di uji). Debian dan Ubuntu hanya punya satu versi PHP bawaan.
+- **Repositori PHP tambahan (Ondřej Surý)** untuk banyak versi PHP: opsional, butuh persetujuan eksplisit di UI karena menambah sumber paket pihak ketiga yang berjalan sebagai root saat dipasang. Ubuntu memakai PPA `ppa:ondrej/php`. Debian memakai paket keyring `debsuryorg-archive-keyring` dari packages.sury.org. **[belum diuji di Debian/Ubuntu nyata]**: langkah ini dibuat dari dokumentasi sekunder, bukan dari uji langsung, dan gagal dengan pesan jelas bila keyring/URL berubah. Verifikasi manual sebelum diandalkan.
+- Repositori vendor untuk versi database tertentu (MySQL 8.4 dari dev.mysql.com, MariaDB dari mariadb.org, PGDG) **belum** ada: versi database mengikuti repositori OS. Menambahnya butuh keputusan Anda (sumber paket tambahan).
+- MySQL dan MariaDB tidak bisa dipasang bersamaan (panel menolak dengan pesan jelas). Hanya satu proses instalasi per VM pada satu waktu (apt memakai lock).
+- Pengelolaan database dari panel (buat/hapus database dan user, hak akses, import/export, query editor) saat ini untuk MySQL/MariaDB. PostgreSQL bisa dipasang tetapi pengelolaannya menyusul (Fase 3).
+
+### Autentikasi root MySQL/MariaDB
+
+Panel menjalankan klien `mariadb`/`mysql` sebagai user SSH (disarankan `root`) lewat unix socket, tanpa password di argumen. Teruji pada **MariaDB 10.11 di Ubuntu 24.04** (root lewat socket). Versi/distro lain **[belum diuji]**: bila root database memakai password, panel menampilkan pesan "root DB butuh password" dan tidak mengelola database itu sampai root diatur memakai `unix_socket`/`auth_socket`. Hasil deteksi flavor (MySQL vs MariaDB) dan versi ditampilkan di halaman Database.
+
+User database dibuat untuk host `localhost` dan `127.0.0.1` sekaligus agar aplikasi di VM yang sama bisa memakai `DB_HOST=127.0.0.1` maupun socket. Password dibuat panel (24 karakter acak), ditampilkan **sekali**, dan tidak disimpan.
+
+## Situs web dan deploy kode
+
+Menu **Situs Web** membuat server block Nginx per domain dan men-deploy kode:
+
+- Jenis: **Laravel** (document root `public/`, `try_files` ke `index.php`), **PHP** biasa/framework lain (CodeIgniter, WordPress, dll), dan **statis** (HTML/hasil build).
+- Struktur di VM: `/var/www/<domain>`, konfigurasi `/etc/nginx/sites-available/<domain>.conf` (+ symlink ke `sites-enabled`), PHP-FPM lewat socket `/run/php/php<versi>-fpm.sock`. Konfigurasi diuji `nginx -t` sebelum dimuat ulang dan dibatalkan otomatis bila ditolak.
+- Nginx di VM mendengarkan **port 80** saja. Arahkan domain di **Nginx Proxy Manager** ke `IP-VM:80` (SSL diurus NPM). Jangan buka port 80 VM ke internet langsung bila tidak perlu.
+- Deploy dari **arsip** (.zip/.tar.gz/.tgz/.tar, unggah streaming) atau dari **Git publik** (https tanpa kredensial; repositori privat: unggah arsip). Arsip yang berisi satu folder pembungkus diratakan otomatis; `__MACOSX` diabaikan.
+- Preset Laravel: membuat folder tulis (`storage/*`, `bootstrap/cache`), `.env` dari `.env.example` bila belum ada, `composer install --no-dev --optimize-autoloader` (opsional), `APP_KEY` bila kosong, `storage:link`, migrasi (opsional, tidak otomatis), cache konfigurasi (opsional), pemilik file `www-data`, dan muat ulang PHP-FPM.
+- **Update** tidak menimpa `.env` dan isi `storage/app` + `storage/logs`. Edit `.env` lewat tombol "Edit .env" (membuka editor File Manager).
+- Tombol **Artisan** hanya menjalankan perintah dari daftar tetap (migrate, migrate:status, db:seed, optimize, optimize:clear, cache:clear, config:clear, storage:link, queue:restart, key:generate).
+- Node.js/Python (proses panjang, reverse proxy) **belum** didukung; hanya PHP dan statis.
+- Nginx memakai server block pertama untuk Host yang tidak dikenal. Pasang situs default (bawaan paket Debian) atau pastikan NPM hanya meneruskan domain yang Anda daftarkan.
+
+## Menjalankan test integrasi (VM uji nyata)
+
+Suite integrasi (file manager, database, installer, situs) berjalan terhadap sshd, MariaDB, Nginx, dan PHP-FPM sungguhan dan **dilewati otomatis** bila tidak tersedia:
+
+```
+sudo apps/server/test/integration/setup-test-vm.sh /tmp/panel-test-vm   # sekali, mesin sekali pakai
+PANEL_TEST_SSH_PORT=2222 PANEL_TEST_AUTHORIZED_KEYS=/tmp/panel-test-vm/authorized_keys npm test
+```
+
+Test negatif lintas akun (IDOR) untuk semua modul selalu jalan tanpa VM nyata.
 
 ## Backup
 

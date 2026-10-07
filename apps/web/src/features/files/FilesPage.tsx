@@ -1,0 +1,556 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { Badge, Button, ConfirmDialog, Input, Modal, Skeleton, useToast } from '../../components';
+import { api } from '../../lib/api';
+import { formatBytes, formatTime, joinPath, parentPath } from '../../lib/format';
+import type { FileEntry } from '../../lib/types';
+import { uploadRaw } from '../../lib/upload';
+import { useVmId } from '../layout/useVmId';
+
+interface Listing {
+  path: string;
+  truncated: boolean;
+  items: FileEntry[];
+}
+
+const QUICK = [
+  ['/', 'Root'],
+  ['/root', 'Home root'],
+  ['/var/www', 'Situs web'],
+  ['/etc/nginx', 'Nginx'],
+  ['/tmp', 'Sementara'],
+] as const;
+const isArchive = (n: string) => /\.(zip|tar|tar\.gz|tgz)$/i.test(n);
+
+type Dialog =
+  | { kind: 'mkdir' }
+  | { kind: 'rename'; entry: FileEntry }
+  | { kind: 'chmod'; entry: FileEntry }
+  | { kind: 'delete'; entry: FileEntry }
+  | { kind: 'archive' }
+  | null;
+
+function Editor({ vmId, path, onClose }: { vmId: string; path: string; onClose: () => void }) {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const [text, setText] = useState<string | null>(null);
+  const file = useQuery({
+    queryKey: ['file-content', vmId, path],
+    gcTime: 0,
+    retry: false,
+    queryFn: async () => {
+      const r = await api<{ content: string; mode: string }>(
+        `/api/vms/${vmId}/files/content?path=${encodeURIComponent(path)}`,
+      );
+      setText(r.content);
+      return r;
+    },
+  });
+  const save = useMutation({
+    mutationFn: () =>
+      api(`/api/vms/${vmId}/files/content`, { method: 'PUT', body: { path, content: text ?? '' } }),
+    onSuccess: async () => {
+      toast.show('success', `${path} disimpan.`);
+      await qc.invalidateQueries({ queryKey: ['files', vmId] });
+      onClose();
+    },
+    onError: (e) => toast.show('error', e.message),
+  });
+  return (
+    <Modal
+      open
+      wide
+      title={`Edit: ${path}`}
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Tutup
+          </Button>
+          <Button loading={save.isPending} disabled={text === null} onClick={() => save.mutate()}>
+            Simpan
+          </Button>
+        </>
+      }
+    >
+      {file.isLoading && <Skeleton className="h-64" />}
+      {file.error && (
+        <p role="alert" className="rounded-md border border-error bg-red-50 p-3 text-red-900">
+          {file.error.message}
+        </p>
+      )}
+      {text !== null && (
+        <textarea
+          aria-label="Isi file"
+          spellCheck={false}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          className="h-96 w-full rounded-md border border-slate-300 p-2 font-mono text-xs"
+        />
+      )}
+    </Modal>
+  );
+}
+
+export function FilesPage() {
+  const vmId = useVmId();
+  const toast = useToast();
+  const qc = useQueryClient();
+  const [sp, setSp] = useSearchParams();
+  const path = sp.get('path') ?? '/var/www';
+  const [editing, setEditing] = useState<string | null>(sp.get('edit'));
+  const [dialog, setDialog] = useState<Dialog>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [name, setName] = useState('');
+  const [mode, setMode] = useState('');
+  const [recursive, setRecursive] = useState(false);
+  const [progress, setProgress] = useState<number | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  const list = useQuery({
+    queryKey: ['files', vmId, path],
+    retry: false,
+    queryFn: () => api<Listing>(`/api/vms/${vmId}/files/list?path=${encodeURIComponent(path)}`),
+  });
+  const go = (p: string) => {
+    setSelected(new Set());
+    setSp({ path: p });
+  };
+  const refresh = () => qc.invalidateQueries({ queryKey: ['files', vmId] });
+  const close = () => {
+    setDialog(null);
+    setName('');
+  };
+  const act = useMutation({
+    mutationFn: (v: { endpoint: string; body: unknown; ok: string }) =>
+      api(`/api/vms/${vmId}/files/${v.endpoint}`, { method: 'POST', body: v.body }),
+    onSuccess: async (_r, v) => {
+      toast.show('success', v.ok);
+      setSelected(new Set());
+      close();
+      await refresh();
+    },
+    onError: (e) => toast.show('error', e.message),
+  });
+
+  const upload = async (files: FileList | null) => {
+    if (!files?.length) return;
+    for (const f of Array.from(files)) {
+      setProgress(0);
+      try {
+        await uploadRaw(
+          'PUT',
+          `/api/vms/${vmId}/files/upload?path=${encodeURIComponent(joinPath(path, f.name))}&overwrite=false`,
+          f,
+          setProgress,
+        );
+        toast.show('success', `${f.name} terunggah.`);
+      } catch (e) {
+        toast.show('error', (e as Error).message);
+      }
+    }
+    setProgress(null);
+    if (fileInput.current) fileInput.current.value = '';
+    await refresh();
+  };
+
+  const crumbs = path.split('/').filter(Boolean);
+  const items = list.data?.items ?? [];
+  const toggle = (n: string) =>
+    setSelected((s) => {
+      const x = new Set(s);
+      if (x.has(n)) x.delete(n);
+      else x.add(n);
+      return x;
+    });
+
+  return (
+    <div>
+      <h1 className="text-2xl font-semibold text-navy">File Manager</h1>
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+        {QUICK.map(([p, t]) => (
+          <button
+            key={p}
+            type="button"
+            onClick={() => go(p)}
+            className="rounded-full border border-slate-300 px-3 py-1 hover:border-navy"
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+      <nav aria-label="Lokasi" className="mt-3 flex flex-wrap items-center gap-1 text-sm">
+        <button type="button" className="text-info underline" onClick={() => go('/')}>
+          /
+        </button>
+        {crumbs.map((c, i) => (
+          <span key={i} className="flex items-center gap-1">
+            <button
+              type="button"
+              className="text-info underline"
+              onClick={() => go(`/${crumbs.slice(0, i + 1).join('/')}`)}
+            >
+              {c}
+            </button>
+            {i < crumbs.length - 1 && <span>/</span>}
+          </span>
+        ))}
+      </nav>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button variant="ghost" disabled={path === '/'} onClick={() => go(parentPath(path))}>
+          Naik
+        </Button>
+        <Button variant="secondary" onClick={() => setDialog({ kind: 'mkdir' })}>
+          Folder baru
+        </Button>
+        <Button onClick={() => fileInput.current?.click()} loading={progress !== null}>
+          Unggah file
+        </Button>
+        <input
+          ref={fileInput}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => void upload(e.target.files)}
+        />
+        <Button
+          variant="ghost"
+          disabled={selected.size === 0}
+          onClick={() => {
+            setName(`arsip-${Date.now().toString(36)}.tar.gz`);
+            setDialog({ kind: 'archive' });
+          }}
+        >
+          Arsipkan ({selected.size})
+        </Button>
+      </div>
+      {progress !== null && (
+        <div
+          className="mt-2"
+          role="progressbar"
+          aria-valuenow={progress}
+          aria-valuemin={0}
+          aria-valuemax={100}
+        >
+          <div className="h-2 rounded bg-slate-200">
+            <div className="h-2 rounded bg-yellow" style={{ width: `${progress}%` }} />
+          </div>
+          <p className="mt-1 text-xs text-slate-600">Mengunggah {progress}%</p>
+        </div>
+      )}
+
+      <div className="mt-4 overflow-x-auto rounded-md border border-slate-200">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-slate-50 text-slate-600">
+            <tr>
+              <th className="w-8 px-3 py-2" />
+              <th className="px-3 py-2 font-medium">Nama</th>
+              <th className="px-3 py-2 font-medium">Ukuran</th>
+              <th className="px-3 py-2 font-medium">Izin</th>
+              <th className="px-3 py-2 font-medium">Diubah</th>
+              <th className="px-3 py-2 font-medium">Aksi</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {list.isLoading &&
+              [0, 1, 2].map((i) => (
+                <tr key={i}>
+                  <td colSpan={6} className="px-3 py-3">
+                    <Skeleton />
+                  </td>
+                </tr>
+              ))}
+            {list.error && (
+              <tr>
+                <td colSpan={6} className="px-3 py-6 text-center text-error" role="alert">
+                  {list.error.message}
+                </td>
+              </tr>
+            )}
+            {list.data && items.length === 0 && (
+              <tr>
+                <td colSpan={6} className="px-3 py-8 text-center text-slate-500">
+                  Folder ini kosong. Unggah file atau buat folder baru.
+                </td>
+              </tr>
+            )}
+            {items.map((e) => (
+              <tr key={e.name}>
+                <td className="px-3 py-2">
+                  <input
+                    type="checkbox"
+                    aria-label={`Pilih ${e.name}`}
+                    checked={selected.has(e.name)}
+                    onChange={() => toggle(e.name)}
+                  />
+                </td>
+                <td className="px-3 py-2">
+                  {e.type === 'dir' ? (
+                    <button
+                      type="button"
+                      className="font-medium text-navy hover:underline"
+                      onClick={() => go(joinPath(path, e.name))}
+                    >
+                      📁 {e.name}
+                    </button>
+                  ) : (
+                    <span>
+                      {e.isLink ? '🔗' : '📄'} {e.name}
+                    </span>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-slate-600">
+                  {e.type === 'dir' ? '-' : formatBytes(e.size)}
+                </td>
+                <td className="px-3 py-2 font-mono text-xs">{e.mode}</td>
+                <td className="px-3 py-2 text-slate-600">{formatTime(e.mtime)}</td>
+                <td className="px-3 py-2">
+                  <div className="flex flex-wrap gap-1">
+                    {e.type === 'file' && (
+                      <a
+                        className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:border-navy"
+                        href={`/api/vms/${vmId}/files/download?path=${encodeURIComponent(joinPath(path, e.name))}`}
+                      >
+                        Unduh
+                      </a>
+                    )}
+                    {e.type === 'file' && (
+                      <Button
+                        variant="ghost"
+                        className="!px-2 !py-1 text-xs"
+                        onClick={() => setEditing(joinPath(path, e.name))}
+                      >
+                        Edit
+                      </Button>
+                    )}
+                    {e.type === 'file' && isArchive(e.name) && (
+                      <Button
+                        variant="ghost"
+                        className="!px-2 !py-1 text-xs"
+                        onClick={() =>
+                          act.mutate({
+                            endpoint: 'extract',
+                            body: { path: joinPath(path, e.name), destDir: path },
+                            ok: `${e.name} diekstrak.`,
+                          })
+                        }
+                      >
+                        Ekstrak
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      className="!px-2 !py-1 text-xs"
+                      onClick={() => {
+                        setName(e.name);
+                        setDialog({ kind: 'rename', entry: e });
+                      }}
+                    >
+                      Ganti nama
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      className="!px-2 !py-1 text-xs"
+                      onClick={() => {
+                        setMode(e.mode);
+                        setRecursive(false);
+                        setDialog({ kind: 'chmod', entry: e });
+                      }}
+                    >
+                      Izin
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      className="!px-2 !py-1 text-xs !text-error"
+                      onClick={() => setDialog({ kind: 'delete', entry: e })}
+                    >
+                      Hapus
+                    </Button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {list.data?.truncated && (
+        <p className="mt-2">
+          <Badge tone="warning">Hanya 5000 item pertama yang ditampilkan.</Badge>
+        </p>
+      )}
+
+      <Modal
+        open={dialog?.kind === 'mkdir'}
+        title="Folder baru"
+        onClose={close}
+        footer={
+          <>
+            <Button variant="ghost" onClick={close}>
+              Batal
+            </Button>
+            <Button
+              loading={act.isPending}
+              onClick={() =>
+                act.mutate({
+                  endpoint: 'mkdir',
+                  body: { path: joinPath(path, name) },
+                  ok: `Folder ${name} dibuat.`,
+                })
+              }
+            >
+              Buat
+            </Button>
+          </>
+        }
+      >
+        <Input
+          label="Nama folder"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          autoFocus
+        />
+      </Modal>
+      <Modal
+        open={dialog?.kind === 'rename'}
+        title="Ganti nama"
+        onClose={close}
+        footer={
+          <>
+            <Button variant="ghost" onClick={close}>
+              Batal
+            </Button>
+            <Button
+              loading={act.isPending}
+              onClick={() =>
+                dialog?.kind === 'rename' &&
+                act.mutate({
+                  endpoint: 'rename',
+                  body: { from: joinPath(path, dialog.entry.name), to: joinPath(path, name) },
+                  ok: 'Nama diganti.',
+                })
+              }
+            >
+              Simpan
+            </Button>
+          </>
+        }
+      >
+        <Input label="Nama baru" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+      </Modal>
+      <Modal
+        open={dialog?.kind === 'chmod'}
+        title="Ubah izin"
+        onClose={close}
+        footer={
+          <>
+            <Button variant="ghost" onClick={close}>
+              Batal
+            </Button>
+            <Button
+              loading={act.isPending}
+              onClick={() =>
+                dialog?.kind === 'chmod' &&
+                act.mutate({
+                  endpoint: 'chmod',
+                  body: { path: joinPath(path, dialog.entry.name), mode, recursive },
+                  ok: 'Izin diubah.',
+                })
+              }
+            >
+              Terapkan
+            </Button>
+          </>
+        }
+      >
+        <Input
+          label="Izin (oktal)"
+          value={mode}
+          onChange={(e) => setMode(e.target.value)}
+          hint="Contoh: 755 untuk folder, 644 untuk file, 600 untuk rahasia."
+        />
+        {dialog?.kind === 'chmod' && dialog.entry.type === 'dir' && (
+          <label className="mt-3 flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={recursive}
+              onChange={(e) => setRecursive(e.target.checked)}
+            />{' '}
+            Terapkan ke semua isi folder (rekursif)
+          </label>
+        )}
+      </Modal>
+      <Modal
+        open={dialog?.kind === 'archive'}
+        title="Buat arsip"
+        onClose={close}
+        footer={
+          <>
+            <Button variant="ghost" onClick={close}>
+              Batal
+            </Button>
+            <Button
+              loading={act.isPending}
+              onClick={() =>
+                act.mutate({
+                  endpoint: 'archive',
+                  body: {
+                    paths: [...selected].map((n) => joinPath(path, n)),
+                    dest: joinPath(path, name),
+                  },
+                  ok: `Arsip ${name} dibuat.`,
+                })
+              }
+            >
+              Buat arsip
+            </Button>
+          </>
+        }
+      >
+        <Input
+          label="Nama arsip"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          hint="Akhiri dengan .zip, .tar.gz, atau .tgz."
+        />
+      </Modal>
+      <ConfirmDialog
+        open={dialog?.kind === 'delete'}
+        title={`Hapus ${dialog?.kind === 'delete' ? dialog.entry.name : ''}`}
+        message={
+          dialog?.kind === 'delete' && dialog.entry.type === 'dir'
+            ? 'Folder beserta seluruh isinya akan dihapus permanen dari VM.'
+            : 'File akan dihapus permanen dari VM.'
+        }
+        requireText={
+          dialog?.kind === 'delete' && dialog.entry.type === 'dir' ? dialog.entry.name : undefined
+        }
+        confirmLabel="Hapus"
+        loading={act.isPending}
+        onConfirm={() =>
+          dialog?.kind === 'delete' &&
+          act.mutate({
+            endpoint: 'delete',
+            body: { path: joinPath(path, dialog.entry.name) },
+            ok: `${dialog.entry.name} dihapus.`,
+          })
+        }
+        onCancel={close}
+      />
+      {editing && (
+        <Editor
+          vmId={vmId}
+          path={editing}
+          onClose={() => {
+            setEditing(null);
+            if (sp.get('edit')) {
+              const n = new URLSearchParams(sp);
+              n.delete('edit');
+              setSp(n);
+            }
+          }}
+        />
+      )}
+    </div>
+  );
+}

@@ -26,11 +26,30 @@ Dokumen ini diisi bertahap. Aturan wajib ada di `CLAUDE.md` bagian 5.
 ### Catatan dan risiko yang diketahui
 
 - `npm audit`: 0 vulnerability saat ini; jalankan berkala.
-- Retensi audit log belum ditentukan pemilik; belum ada penghapusan otomatis.
+- Retensi audit log: 90 hari (bawaan, bisa diubah).
 - Rotasi master key (`scripts/rotate-key.ts`) belum dibuat.
-- Email notifikasi menunggu SMTP; notifikasi in-app sudah jalan.
+- Email tidak dipakai (keputusan pemilik); notifikasi lewat notification center.
 - Admin dapat membuka terminal semua VM (sengaja: admin adalah pemilik). Aksinya tercatat di audit.
 - Verifikasi di browser nyata (Playwright) dilakukan manual sekali pada Fase 1; belum ada suite E2E otomatis (direncanakan akhir proyek).
+
+## Status Fase 2
+
+- **Eksekusi perintah di VM**: selalu daftar argumen tetap (argv) yang di-quote dengan `shellQuote` (diuji dengan shell sungguhan terhadap kutip, `$()`, backtick, `;`, newline, glob, unicode). Data dinamis lewat stdin. Skrip shell yang dipakai statis (parameter posisi, bukan interpolasi). Tidak ada endpoint yang menerima perintah bebas.
+- **File manager**: lewat SFTP; path dinormalisasi di server; folder sistem tingkat atas (`/`, `/etc`, `/usr`, `/var`, dll) dilindungi dari hapus/pindah/chmod rekursif; upload/download streaming dengan batas ukuran (`MAX_UPLOAD_MB`, bawaan 512) dan file sementara dibersihkan saat gagal; edit teks dibatasi 1 MB dengan deteksi biner/non-UTF-8; izin file dipertahankan saat edit. Audit mencatat path, bukan isi.
+- **Database manager**: nama database/user divalidasi `^[a-z][a-z0-9_]{2,31}$` dan daftar nama terlarang; SQL lewat stdin (password tidak pernah di argumen proses); password user dibuat panel (24 karakter), ditampilkan sekali, tidak disimpan di DB panel, audit, notifikasi, maupun job (ada test yang memindai semua tabel). Hapus butuh konfirmasi nama di server dan UI. Aksi berisiko memberi notifikasi ke admin. Isi query tidak dicatat (hanya kata pertama dan panjang). Bug tertangkap uji nyata dan diperbaiki: `GRANT` bersifat menambah, jadi level "baca saja" kini mencabut hak lama dulu.
+- **Installer**: katalog tetap; versi PHP/PostgreSQL harus cocok regex dan ditemukan di repositori VM; ekstensi opsional dari daftar tetap dan dicek ketersediaannya. Repositori pihak ketiga (PHP) butuh persetujuan eksplisit dan hanya terpasang atas klik pengguna.
+- **Situs dan deploy**: domain divalidasi ketat (dipakai di path dan konfigurasi nginx), konfigurasi diuji `nginx -t` dengan rollback; dotfile (`.env`, `.git`) diblokir di nginx; artisan hanya perintah daftar tetap; URL Git hanya `https://` tanpa kredensial/query; `chown -R`/`chmod -R` tidak mengikuti symlink; `.env` dan `storage/app` tidak ditimpa saat update. Bug tertangkap uji nyata dan diperbaiki: halaman placeholder membuat deploy pertama dianggap update.
+- **Jobs**: satu proses per VM; log dibatasi 512 KB; job yang berjalan saat server restart ditandai gagal.
+- **Otorisasi**: matriks IDOR otomatis (tanpa VM nyata) menguji semua endpoint modul: bukan pemilik = 404, tanpa sesi = 401, modul dimatikan = 403 (termasuk untuk admin), client tidak bisa mengaktifkan modul sendiri.
+- **Retensi**: audit log dihapus setelah `AUDIT_RETENTION_DAYS` (90 hari bawaan); tetap tidak bisa di-UPDATE.
+
+### Risiko dan catatan Fase 2
+
+- Client memiliki root di VM-nya; semua fitur di atas memang beroperasi sebagai root di VM tersebut. Batas keamanan ada pada isolasi antar VM dan antar akun di panel, bukan di dalam VM.
+- Pool koneksi SSH dibagi per VM (banyak channel per koneksi) dan ditutup saat idle 60 detik atau saat konfigurasi/host key VM berubah.
+- Jalur Debian untuk repositori PHP belum diuji di Debian nyata (lihat DEPLOY.md). Jalur Ubuntu (PPA) juga belum dijalankan end-to-end; hanya perencanaan langkahnya yang diuji.
+- Pemasangan dan deploy berjalan lama di latar belakang; tidak ada pembatalan dari UI (menutup tab tidak menghentikan proses).
+- `docs/SECURITY.md` belum mencakup pen-test eksternal; tinjauan keamanan menyeluruh dijadwalkan Fase 3.
 
 ## Hasil `npm audit`
 

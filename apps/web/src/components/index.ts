@@ -6,3 +6,4 @@ export * from './Modal';
 export * from './Skeleton';
 export * from './Table';
 export * from './Toast';
+export * from './JobLog';

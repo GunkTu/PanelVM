@@ -11,6 +11,7 @@ export class ApiError extends Error {
 let csrfToken = '';
 let onUnauthorized: (() => void) | null = null;
 
+export const getCsrfToken = (): string => csrfToken;
 export const setCsrfToken = (t: string): void => {
   csrfToken = t;
 };
