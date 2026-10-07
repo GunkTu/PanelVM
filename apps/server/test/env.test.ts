@@ -34,3 +34,26 @@ describe('loadEnv', () => {
     }
   });
 });
+
+describe('TRUST_PROXY', () => {
+  it('menerima true/false dan daftar IP/CIDR proxy tepercaya', () => {
+    expect(loadEnv({ ...valid, TRUST_PROXY: 'true' }).TRUST_PROXY).toBe(true);
+    expect(loadEnv({ ...valid, TRUST_PROXY: 'false' }).TRUST_PROXY).toBe(false);
+    expect(
+      loadEnv({ ...valid, TRUST_PROXY: '192.168.1.10, 10.0.0.0/8,::1,fd00::/8' }).TRUST_PROXY,
+    ).toEqual(['192.168.1.10', '10.0.0.0/8', '::1', 'fd00::/8']);
+  });
+  it('menolak nilai yang bukan IP/CIDR', () => {
+    for (const v of [
+      'yes',
+      '1',
+      'proxy.local',
+      '10.0.0.0/33',
+      '10.0.0.1/',
+      '300.1.1.1',
+      '10.0.0.1,abc',
+    ]) {
+      expect(() => loadEnv({ ...valid, TRUST_PROXY: v }), v).toThrow(/TRUST_PROXY|IP\/CIDR/);
+    }
+  });
+});

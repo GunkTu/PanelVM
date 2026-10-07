@@ -227,3 +227,24 @@ describe('rate limit', () => {
     await limited.app.close();
   });
 });
+
+describe('anti-replay TOTP', () => {
+  it('dua verifikasi bersamaan dengan kode yang sama: hanya satu yang lolos', async () => {
+    const u = await seedUser(built, 'konkuren@contoh.com');
+    const code = generateSync({ secret: u.totpSecret });
+    const start = async () => {
+      const r = await rawLogin(u.email, PASSWORD);
+      return { cookie: cookieFrom(r), csrf: r.json().csrfToken as string };
+    };
+    const [a, b] = await Promise.all([start(), start()]);
+    const verify = (s: { cookie: string; csrf: string }) =>
+      app.inject({
+        method: 'POST',
+        url: '/api/auth/2fa/verify',
+        headers: { origin: ORIGIN, cookie: s.cookie, 'x-csrf-token': s.csrf },
+        payload: { code },
+      });
+    const results = await Promise.all([verify(a), verify(b)]);
+    expect(results.map((r) => r.statusCode).sort()).toEqual([200, 401]);
+  });
+});

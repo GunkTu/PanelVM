@@ -20,6 +20,7 @@ const psql = (user: string, pw: string, database: string, sql: string) =>
   })
     .toString()
     .trim();
+const list0Databases = () => admin('SELECT datname FROM pg_database').split('\n');
 const admin = (sql: string) =>
   execFileSync('runuser', ['-u', 'postgres', '--', 'psql', '-X', '-Atc', sql]).toString().trim();
 
@@ -120,6 +121,13 @@ describe.skipIf(!vmAvailable)('database manager PostgreSQL (PG nyata)', () => {
     ]) {
       expect((await post('', { name })).statusCode, name).toBe(400);
     }
+    // PostgreSQL mencadangkan awalan pg_ untuk role: ditolak dengan pesan jelas sebelum sampai ke server
+    for (const body of [{ name: `${db}_x`, user: 'pg_pengguna' }, { name: 'pg_pengguna' }]) {
+      const r = await post(body.user ? '' : '/users', body);
+      expect(r.statusCode, JSON.stringify(body)).toBe(400);
+      expect(r.json().message).toContain('pg_');
+    }
+    expect(list0Databases()).not.toContain(`${db}_x`); // tidak ada database setengah jadi
     expect((await post('', { name: db })).statusCode).toBe(409);
     expect((await post('/users', { name: usr })).statusCode).toBe(409);
   });

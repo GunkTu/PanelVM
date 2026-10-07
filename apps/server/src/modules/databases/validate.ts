@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
+import { AppError } from '../../errors.js';
 
 export const IDENT = /^[a-z][a-z0-9_]{2,31}$/;
 
@@ -58,4 +59,18 @@ export function sqlString(value: string): string {
 export function sqlIdent(name: string): string {
   if (!IDENT.test(name)) throw new Error('Identifier tidak valid');
   return `\`${name}\``;
+}
+
+/**
+ * Nama user (role) per engine. PostgreSQL mencadangkan awalan "pg_" untuk role bawaan sistem,
+ * jadi CREATE ROLE dengan awalan itu pasti ditolak; beri pesan jelas sebelum sampai ke server database.
+ */
+export function assertRoleName(engine: 'mysql' | 'postgres', name: string): void {
+  if (engine === 'postgres' && name.startsWith('pg_')) {
+    throw new AppError(
+      400,
+      'reserved_role_prefix',
+      'Nama user PostgreSQL tidak boleh diawali "pg_" (dicadangkan oleh PostgreSQL). Gunakan nama lain, misalnya awali dengan "u_".',
+    );
+  }
 }

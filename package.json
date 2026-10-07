@@ -21,10 +21,12 @@
     "db:migrate": "npm run db:migrate -w apps/server --if-present",
     "create-admin": "npm run create-admin -w apps/server --if-present",
     "db:backup": "npm run db:backup -w apps/server --if-present",
-    "rotate-key": "npm run rotate-key -w apps/server --if-present"
+    "rotate-key": "npm run rotate-key -w apps/server --if-present",
+    "e2e": "playwright test -c e2e/playwright.config.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.63.0",
     "eslint": "^10.12.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.13.0",

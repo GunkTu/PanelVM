@@ -13,7 +13,7 @@ import { privOpts, sshTargetFor, withVm } from '../vms/service.js';
 import { MysqlDriver } from './mysql.js';
 import { PostgresDriver } from './postgres.js';
 import type { DbDriver, Engine } from './types.js';
-import { dbIdentifier, generateDbPassword } from './validate.js';
+import { assertRoleName, dbIdentifier, generateDbPassword } from './validate.js';
 
 const vmParams = z.object({ vmId: z.string().uuid() });
 const MAX_SQL_CHARS = 200_000;
@@ -110,6 +110,7 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/vms/:vmId/databases', { onRequest: requireActive }, async (req) => {
     const { vm, userId } = access(req);
     const b = z.object({ name: dbIdentifier, user: dbIdentifier.optional() }).parse(req.body);
+    if (b.user) assertRoleName(engineOf(req), b.user);
     const result = await withDriver(vm, engineOf(req), async (d) => {
       await d.createDatabase(b.name);
       if (!b.user) return null;
@@ -146,6 +147,7 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/vms/:vmId/databases/users', { onRequest: requireActive }, async (req) => {
     const { vm, userId } = access(req);
     const b = z.object({ name: dbIdentifier, database: dbIdentifier.optional() }).parse(req.body);
+    assertRoleName(engineOf(req), b.name);
     const password = generateDbPassword();
     await withDriver(vm, engineOf(req), async (d) => {
       await d.createUser(b.name, password);
@@ -165,6 +167,7 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
     async (req) => {
       const { vm, userId } = access(req);
       const b = z.object({ name: dbIdentifier }).parse(req.body);
+      assertRoleName(engineOf(req), b.name);
       const password = generateDbPassword();
       await withDriver(vm, engineOf(req), async (d) => {
         if (!(await d.listUsers()).some((u) => u.name === b.name))
@@ -183,6 +186,7 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/vms/:vmId/databases/users/drop', { onRequest: requireActive }, async (req) => {
     const { vm, userId } = access(req);
     const b = z.object({ name: dbIdentifier, confirm: z.string() }).parse(req.body);
+    assertRoleName(engineOf(req), b.name);
     if (b.confirm !== b.name)
       throw new AppError(
         400,
@@ -200,6 +204,7 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
     const b = z
       .object({ user: dbIdentifier, database: dbIdentifier, level: z.enum(['all', 'readonly']) })
       .parse(req.body);
+    assertRoleName(engineOf(req), b.user);
     await withDriver(vm, engineOf(req), async (d) => {
       const dbs = await d.listDatabases();
       if (!dbs.some((x) => x.name === b.database))
@@ -219,6 +224,7 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/vms/:vmId/databases/revoke', { onRequest: requireActive }, async (req) => {
     const { vm, userId } = access(req);
     const b = z.object({ user: dbIdentifier, database: dbIdentifier }).parse(req.body);
+    assertRoleName(engineOf(req), b.user);
     await withDriver(vm, engineOf(req), (d) => d.revoke(b.user, b.database));
     rec(req, vm, userId, 'revoke', `${b.user}@${b.database}`);
     return { ok: true };

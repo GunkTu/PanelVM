@@ -1,10 +1,43 @@
+import { isIP } from 'node:net';
 import { z } from 'zod';
 
 const base64Key32 = z.string().refine((v) => Buffer.from(v, 'base64').length === 32, {
   message: 'harus 32 byte dalam base64 (contoh: openssl rand -base64 32)',
 });
 
-const boolString = z.enum(['true', 'false']).transform((v) => v === 'true');
+/** IP atau CIDR (IPv4/IPv6) yang valid. */
+export function isIpOrCidr(v: string): boolean {
+  const [addr, bits, ...rest] = v.split('/');
+  if (rest.length || !addr) return false;
+  const ver = isIP(addr);
+  if (!ver) return false;
+  if (bits === undefined) return true;
+  const n = Number(bits);
+  return /^\d{1,3}$/.test(bits) && n >= 0 && n <= (ver === 4 ? 32 : 128);
+}
+
+/**
+ * TRUST_PROXY: "false", "true" (percaya semua hop, hanya aman bila panel TIDAK bisa dijangkau selain lewat proxy),
+ * atau daftar IP/CIDR proxy tepercaya dipisah koma (disarankan: IP Nginx Proxy Manager).
+ */
+export const trustProxySchema = z
+  .string()
+  .default('false')
+  .transform((raw, ctx): boolean | string[] => {
+    const v = raw.trim();
+    if (v === 'true') return true;
+    if (v === 'false' || v === '') return false;
+    const list = v.split(',').map((x) => x.trim());
+    if (!list.every(isIpOrCidr)) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'harus "true", "false", atau daftar IP/CIDR proxy dipisah koma (contoh: 192.168.1.10,10.0.0.0/8)',
+      });
+      return z.NEVER;
+    }
+    return list;
+  });
 
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -18,7 +51,7 @@ const schema = z.object({
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
   SMTP_FROM: z.string().optional(),
-  TRUST_PROXY: boolString.default(false),
+  TRUST_PROXY: trustProxySchema,
   /** Retensi audit log (hari). Catatan lebih lama dihapus otomatis. */
   AUDIT_RETENTION_DAYS: z.coerce.number().int().min(7).max(3650).default(90),
   /** Interval pemeriksaan status VM (detik). 0 = nonaktif. */

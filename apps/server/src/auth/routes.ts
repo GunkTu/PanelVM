@@ -149,9 +149,14 @@ export function authRoutes(app: FastifyInstance, ctx: Ctx): void {
       if (/^\d{6}$/.test(code) && user.totp_secret_enc) {
         const secret = box.decrypt(user.totp_secret_enc, secretContext(user.id));
         const step = verifyTotp(secret, code);
-        if (step !== null && step > (user.totp_last_step ?? -1)) {
-          db.prepare('UPDATE users SET totp_last_step = ? WHERE id = ?').run(step, user.id);
-          ok = true;
+        if (step !== null) {
+          // Atomik: dua permintaan bersamaan dengan kode yang sama tidak boleh sama-sama lolos (anti-replay).
+          ok =
+            db
+              .prepare(
+                'UPDATE users SET totp_last_step = ? WHERE id = ? AND (totp_last_step IS NULL OR totp_last_step < ?)',
+              )
+              .run(step, user.id, step).changes === 1;
         }
       } else if (RECOVERY_PATTERN.test(normalizeRecovery(code))) {
         ok = await consumeRecoveryCode(db, user.id, code);

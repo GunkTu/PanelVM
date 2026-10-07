@@ -18,6 +18,10 @@ export default tseslint.config(
     rules: reactHooks.configs.recommended.rules,
   },
   {
+    files: ['e2e/**/*.ts'],
+    languageOptions: { globals: globals.node },
+  },
+  {
     files: ['*.config.{js,ts}', 'apps/*/*.config.ts'],
     languageOptions: { globals: globals.node },
   },
