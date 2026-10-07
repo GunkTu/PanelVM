@@ -1,15 +1,7 @@
 import { afterAll, describe, expect, it } from 'vitest';
-import { buildApp } from '../src/app.js';
-import { loadEnv } from '../src/config/env.js';
+import { makeApp } from './helpers.js';
 
-const env = loadEnv({
-  NODE_ENV: 'test',
-  APP_ORIGIN: 'https://panel.contoh.com',
-  DATABASE_PATH: ':memory:',
-  SECRETS_MASTER_KEY: Buffer.alloc(32, 1).toString('base64'),
-  SESSION_SECRET: 'x'.repeat(40),
-});
-const app = await buildApp(env);
+const { app } = await makeApp();
 afterAll(() => app.close());
 
 describe('app', () => {
@@ -25,5 +17,28 @@ describe('app', () => {
     const scriptSrc = csp.split(';').find((d) => d.trim().startsWith('script-src')) ?? '';
     expect(scriptSrc).not.toContain('unsafe-inline');
     expect(csp).toContain("frame-ancestors 'none'");
+  });
+
+  it('endpoint terlindungi menolak tanpa sesi', async () => {
+    for (const url of [
+      '/api/vms',
+      '/api/users',
+      '/api/audit',
+      '/api/notifications',
+      '/api/auth/me',
+    ]) {
+      const res = await app.inject({ method: 'GET', url });
+      expect(res.statusCode, url).toBe(401);
+    }
+  });
+
+  it('tidak ada endpoint registrasi publik', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      headers: { origin: 'https://panel.contoh.com' },
+      payload: {},
+    });
+    expect(res.statusCode).toBe(404);
   });
 });
