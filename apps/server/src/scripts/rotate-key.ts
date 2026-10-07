@@ -17,7 +17,8 @@ if (Buffer.from(next, 'base64').length !== 32) {
   console.error('NEW_SECRETS_MASTER_KEY harus diisi: 32 byte base64 (openssl rand -base64 32).');
   process.exit(1);
 }
-if (next === env.SECRETS_MASTER_KEY) {
+// Bandingkan byte (bukan string): base64 yang sama bisa tertulis dengan atau tanpa padding.
+if (Buffer.from(next, 'base64').equals(Buffer.from(env.SECRETS_MASTER_KEY, 'base64'))) {
   console.error('Kunci baru sama dengan kunci lama. Buat kunci baru yang berbeda.');
   process.exit(1);
 }

@@ -1,0 +1,43 @@
+# /etc/systemd/system/panelvm.service
+# CATATAN: sintaks diverifikasi dengan `systemd-analyze verify` (hanya path node yang tidak ada di sandbox);
+# perilaku runtime BELUM diuji di systemd nyata. Verifikasi di VM panel dengan:
+#   systemd-analyze verify /etc/systemd/system/panelvm.service
+#   systemd-analyze security panelvm.service
+[Unit]
+Description=Panel VM (akses internal ke VM Proxmox)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=panelvm
+Group=panelvm
+WorkingDirectory=/opt/panelvm/apps/server
+# Berisi SECRETS_MASTER_KEY dan SESSION_SECRET: chmod 0640, pemilik root:panelvm.
+EnvironmentFile=/etc/panelvm/panel.env
+ExecStart=/usr/bin/node dist/index.js
+Restart=on-failure
+RestartSec=3
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ReadWritePaths=/var/lib/panel
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+# Jangan set MemoryDenyWriteExecute=true: JIT V8 (Node.js) butuh memori W+X.
+
+[Install]
+WantedBy=multi-user.target

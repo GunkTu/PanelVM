@@ -41,13 +41,15 @@ export function clearSessionCookie(ctx: Ctx, reply: FastifyReply): void {
   reply.clearCookie(cookieName(ctx), { path: '/' });
 }
 
-/** Hook onRequest global untuk /api: resolve sesi, tolak Origin asing, dan wajibkan token CSRF. */
+/** Hook onRequest global: resolve sesi, tolak Origin asing, dan wajibkan token CSRF. */
 export function authHook(ctx: Ctx) {
   return async (req: FastifyRequest) => {
     req.auth = null;
-    if (!req.url.startsWith('/api/')) return;
-
     const unsafe = !SAFE_METHODS.has(req.method);
+    // Hanya pembacaan aset statis yang dilewati. Pengecekan memakai includes('/api'), bukan startsWith('/api/'),
+    // agar variasi URL (mis. '//api/...') tidak bisa menghindari Origin/CSRF seandainya routing kelak dilonggarkan.
+    if (!unsafe && !req.url.includes('/api')) return;
+
     if (unsafe && req.headers.origin !== ctx.env.APP_ORIGIN) {
       throw new AppError(
         403,

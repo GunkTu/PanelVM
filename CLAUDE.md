@@ -228,18 +228,23 @@ TRUST_PROXY=true
 
 ## 10. Perintah Umum
 
-Sesuaikan jika skrip di `package.json` berbeda. Perbarui bagian ini begitu skrip final.
+Skrip sudah final. Perbarui bagian ini bila skrip berubah.
 
 ```
 npm install                 # instal dependensi workspace
 npm run dev                 # jalankan server dan web (development)
 npm run build               # build produksi
-npm run test                # unit + integrasi
+npm run test                # unit + integrasi (suite VM nyata dilewati bila PANEL_TEST_* tidak diset)
+npm run e2e                 # E2E Playwright (lihat docs/DEPLOY.md)
 npm run lint                # ESLint
 npm run typecheck           # tsc --noEmit
 npm run db:migrate          # jalankan migrasi
 npm run create-admin        # buat admin pertama (interaktif)
+npm run db:backup           # backup SQLite konsisten (BACKUP_DIR, BACKUP_KEEP)
+npm run rotate-key          # rotasi SECRETS_MASTER_KEY (butuh NEW_SECRETS_MASTER_KEY di environment)
 ```
+
+Di produksi, skrip dijalankan dari hasil build: `node --env-file=/etc/panelvm/panel.env dist/scripts/<nama>.js` (lihat `docs/DEPLOY.md`).
 
 ## 11. Cara Bekerja (Alur untuk Claude Code)
 

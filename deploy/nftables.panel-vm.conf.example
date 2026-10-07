@@ -1,0 +1,31 @@
+#!/usr/sbin/nft -f
+# Contoh firewall untuk VM PANEL (bukan VM client). Ganti semua alamat placeholder dengan alamat nyata.
+# CATATAN: sintaks lolos `nft -c -f` (cek tanpa menerapkan); efeknya di jaringan Anda BELUM diuji.
+# Terapkan lewat konsol Proxmox (bukan SSH) agar tidak mengunci diri bila salah alamat.
+#   nft -c -f nftables.panel-vm.conf.example     # cek sintaks saja
+define NPM        = 192.168.1.10          # Nginx Proxy Manager (satu-satunya yang boleh ke port panel)
+define ADMIN_NET  = 192.168.1.0/24         # jaringan admin untuk SSH ke VM panel
+define VM_TARGETS = { 192.168.1.21, 192.168.1.22 }   # VM client yang boleh dijangkau panel lewat SSH
+define DNS        = 192.168.1.1
+
+flush ruleset
+table inet panel {
+  chain input {
+    type filter hook input priority 0; policy drop;
+    ct state established,related accept
+    iif lo accept
+    ip saddr $NPM tcp dport 3000 accept
+    ip saddr $ADMIN_NET tcp dport 22 accept
+    icmp type echo-request limit rate 5/second accept
+  }
+  chain output {
+    type filter hook output priority 0; policy drop;
+    ct state established,related accept
+    oif lo accept
+    ip daddr $VM_TARGETS tcp dport 22 accept      # panel hanya keluar ke SSH VM target
+    ip daddr $DNS udp dport 53 accept
+    ip daddr $DNS tcp dport 53 accept
+    # Untuk apt/npm di VM panel sendiri, buka sementara saat update lalu tutup lagi.
+  }
+  chain forward { type filter hook forward priority 0; policy drop; }
+}

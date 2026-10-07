@@ -1,0 +1,11 @@
+# /etc/systemd/system/panelvm-backup.timer  (sintaks terverifikasi; runtime belum diuji di systemd nyata)
+[Unit]
+Description=Backup harian database Panel VM
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

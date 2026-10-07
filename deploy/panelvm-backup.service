@@ -1,0 +1,19 @@
+# /etc/systemd/system/panelvm-backup.service  (sintaks terverifikasi; runtime belum diuji di systemd nyata)
+[Unit]
+Description=Backup database Panel VM
+
+[Service]
+Type=oneshot
+User=panelvm
+Group=panelvm
+WorkingDirectory=/opt/panelvm/apps/server
+EnvironmentFile=/etc/panelvm/panel.env
+Environment=BACKUP_DIR=/var/lib/panel/backups
+Environment=BACKUP_KEEP=14
+ExecStart=/usr/bin/node dist/scripts/backup-db.js
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/panel
+UMask=0077
