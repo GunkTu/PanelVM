@@ -1,3 +1,4 @@
+import { rateLimit } from '../../ratelimit.js';
 import type { Readable } from 'node:stream';
 import { Transform } from 'node:stream';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -74,7 +75,7 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
     ].join('\n'),
   });
 
-  app.get('/api/vms/:vmId/databases/engines', { preHandler: requireActive }, async (req) => {
+  app.get('/api/vms/:vmId/databases/engines', { onRequest: requireActive }, async (req) => {
     const { vm } = access(req);
     const mysql = await withDriver(vm, (d) => d.info());
     // Deteksi PostgreSQL hanya informatif; manajemennya menyusul (Fase 3).
@@ -105,15 +106,19 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
     };
   });
 
-  app.get('/api/vms/:vmId/databases', { preHandler: requireActive }, async (req) => {
-    const { vm } = access(req);
-    return withDriver(vm, async (d) => ({
-      databases: await d.listDatabases(),
-      users: await d.listUsers(),
-    }));
-  });
+  app.get(
+    '/api/vms/:vmId/databases',
+    { config: rateLimit(30), onRequest: requireActive },
+    async (req) => {
+      const { vm } = access(req);
+      return withDriver(vm, async (d) => ({
+        databases: await d.listDatabases(),
+        users: await d.listUsers(),
+      }));
+    },
+  );
 
-  app.post('/api/vms/:vmId/databases', { preHandler: requireActive }, async (req) => {
+  app.post('/api/vms/:vmId/databases', { onRequest: requireActive }, async (req) => {
     const { vm, userId } = access(req);
     const b = z.object({ name: dbIdentifier, user: dbIdentifier.optional() }).parse(req.body);
     const result = await withDriver(vm, async (d) => {
@@ -134,7 +139,7 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { ok: true, credentials: result };
   });
 
-  app.post('/api/vms/:vmId/databases/drop', { preHandler: requireActive }, async (req) => {
+  app.post('/api/vms/:vmId/databases/drop', { onRequest: requireActive }, async (req) => {
     const { vm, userId } = access(req);
     const b = z.object({ name: dbIdentifier, confirm: z.string() }).parse(req.body);
     if (b.confirm !== b.name)
@@ -149,7 +154,7 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { ok: true };
   });
 
-  app.post('/api/vms/:vmId/databases/users', { preHandler: requireActive }, async (req) => {
+  app.post('/api/vms/:vmId/databases/users', { onRequest: requireActive }, async (req) => {
     const { vm, userId } = access(req);
     const b = z.object({ name: dbIdentifier, database: dbIdentifier.optional() }).parse(req.body);
     const password = generateDbPassword();
@@ -167,7 +172,7 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.post(
     '/api/vms/:vmId/databases/users/password',
-    { preHandler: requireActive },
+    { config: rateLimit(20), onRequest: requireActive },
     async (req) => {
       const { vm, userId } = access(req);
       const b = z.object({ name: dbIdentifier }).parse(req.body);
@@ -186,7 +191,7 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
     },
   );
 
-  app.post('/api/vms/:vmId/databases/users/drop', { preHandler: requireActive }, async (req) => {
+  app.post('/api/vms/:vmId/databases/users/drop', { onRequest: requireActive }, async (req) => {
     const { vm, userId } = access(req);
     const b = z.object({ name: dbIdentifier, confirm: z.string() }).parse(req.body);
     if (b.confirm !== b.name)
@@ -201,7 +206,7 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { ok: true };
   });
 
-  app.post('/api/vms/:vmId/databases/grant', { preHandler: requireActive }, async (req) => {
+  app.post('/api/vms/:vmId/databases/grant', { onRequest: requireActive }, async (req) => {
     const { vm, userId } = access(req);
     const b = z
       .object({ user: dbIdentifier, database: dbIdentifier, level: z.enum(['all', 'readonly']) })
@@ -222,7 +227,7 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { ok: true };
   });
 
-  app.post('/api/vms/:vmId/databases/revoke', { preHandler: requireActive }, async (req) => {
+  app.post('/api/vms/:vmId/databases/revoke', { onRequest: requireActive }, async (req) => {
     const { vm, userId } = access(req);
     const b = z.object({ user: dbIdentifier, database: dbIdentifier }).parse(req.body);
     await withDriver(vm, (d) => d.revoke(b.user, b.database));
@@ -232,7 +237,7 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.post(
     '/api/vms/:vmId/databases/query',
-    { preHandler: requireActive, bodyLimit: MAX_SQL_CHARS * 4 },
+    { config: rateLimit(60), onRequest: requireActive, bodyLimit: MAX_SQL_CHARS * 4 },
     async (req) => {
       const { vm, userId } = access(req);
       const b = z
@@ -264,7 +269,7 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
   // Import: body mentah (stream) langsung ke stdin klien mysql di VM, tanpa file sementara.
   app.post(
     '/api/vms/:vmId/databases/import',
-    { preHandler: requireActive, bodyLimit: maxBytes },
+    { config: rateLimit(10), onRequest: requireActive, bodyLimit: maxBytes },
     async (req) => {
       const { vm, userId } = access(req);
       const { database } = z.object({ database: dbIdentifier }).parse(req.query);
@@ -316,34 +321,38 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
     },
   );
 
-  app.get('/api/vms/:vmId/databases/export', { preHandler: requireActive }, async (req, reply) => {
-    const { vm, userId } = access(req);
-    const { database } = z.object({ database: dbIdentifier }).parse(req.query);
-    const { vmId } = vmParams.parse(req.params);
-    const lease = await ctx.pool.acquire(vmId, sshTargetFor(ctx, vm));
-    try {
-      const d = driver(vm, lease);
-      if (!(await d.listDatabases()).some((x) => x.name === database))
-        throw new AppError(404, 'db_unknown', 'Database tidak ditemukan. Muat ulang daftar.');
-      const { stream, done } = await d.exportSql(database);
-      const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      reply
-        .header('Content-Type', 'application/sql; charset=utf-8')
-        .header('Content-Disposition', `attachment; filename="${database}-${stamp}.sql"`)
-        .header('X-Content-Type-Options', 'nosniff');
-      rec(req, vm, userId, 'export', database);
-      done.catch((e) => {
-        ctx.log?.warn({ err: (e as Error).message }, 'dump gagal');
-        reply.raw.destroy(); // putuskan koneksi agar unduhan tidak terlihat "sukses" padahal terpotong
-      });
-      reply.raw.on('close', () => {
-        stream.destroy();
+  app.get(
+    '/api/vms/:vmId/databases/export',
+    { config: rateLimit(20), onRequest: requireActive },
+    async (req, reply) => {
+      const { vm, userId } = access(req);
+      const { database } = z.object({ database: dbIdentifier }).parse(req.query);
+      const { vmId } = vmParams.parse(req.params);
+      const lease = await ctx.pool.acquire(vmId, sshTargetFor(ctx, vm));
+      try {
+        const d = driver(vm, lease);
+        if (!(await d.listDatabases()).some((x) => x.name === database))
+          throw new AppError(404, 'db_unknown', 'Database tidak ditemukan. Muat ulang daftar.');
+        const { stream, done } = await d.exportSql(database);
+        const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+        reply
+          .header('Content-Type', 'application/sql; charset=utf-8')
+          .header('Content-Disposition', `attachment; filename="${database}-${stamp}.sql"`)
+          .header('X-Content-Type-Options', 'nosniff');
+        rec(req, vm, userId, 'export', database);
+        done.catch((e) => {
+          ctx.log?.warn({ err: (e as Error).message }, 'dump gagal');
+          reply.raw.destroy(); // putuskan koneksi agar unduhan tidak terlihat "sukses" padahal terpotong
+        });
+        reply.raw.on('close', () => {
+          stream.destroy();
+          lease.release();
+        });
+        return reply.send(stream);
+      } catch (e) {
         lease.release();
-      });
-      return reply.send(stream);
-    } catch (e) {
-      lease.release();
-      throw e;
-    }
-  });
+        throw e;
+      }
+    },
+  );
 }

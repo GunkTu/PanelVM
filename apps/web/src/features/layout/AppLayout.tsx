@@ -129,6 +129,8 @@ export function AppLayout() {
                 ['database', 'Database', 'databases'],
                 ['software', 'Aplikasi', 'software'],
                 ['sites', 'Situs Web', 'sites'],
+                ['monitoring', 'Monitoring', 'monitoring'],
+                ['services', 'Service', 'services'],
               ] as const
             )
               .filter(([m]) => vm.data.modules[m])

@@ -21,6 +21,8 @@ const schema = z.object({
   TRUST_PROXY: boolString.default(false),
   /** Retensi audit log (hari). Catatan lebih lama dihapus otomatis. */
   AUDIT_RETENTION_DAYS: z.coerce.number().int().min(7).max(3650).default(90),
+  /** Interval pemeriksaan status VM (detik). 0 = nonaktif. */
+  VM_CHECK_INTERVAL_SEC: z.coerce.number().int().min(0).max(3600).default(60),
   /** Batas ukuran satu upload file/SQL/source code (MB). */
   MAX_UPLOAD_MB: z.coerce.number().int().min(1).max(10240).default(512),
 });

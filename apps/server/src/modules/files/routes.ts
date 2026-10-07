@@ -1,3 +1,4 @@
+import { rateLimit } from '../../ratelimit.js';
 import { randomBytes } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import { Transform } from 'node:stream';
@@ -80,7 +81,7 @@ export function fileRoutes(app: FastifyInstance, ctx: Ctx): void {
     return r;
   };
 
-  app.get('/api/vms/:vmId/files/list', { preHandler: requireActive }, async (req) => {
+  app.get('/api/vms/:vmId/files/list', { onRequest: requireActive }, async (req) => {
     const { vm } = access(req);
     const { path } = pathQuery.parse(req.query);
     return withSftp(vm, async (s) => {
@@ -124,7 +125,7 @@ export function fileRoutes(app: FastifyInstance, ctx: Ctx): void {
     });
   });
 
-  app.get('/api/vms/:vmId/files/content', { preHandler: requireActive }, async (req) => {
+  app.get('/api/vms/:vmId/files/content', { onRequest: requireActive }, async (req) => {
     const { vm } = access(req);
     const { path } = pathQuery.parse(req.query);
     return withSftp(vm, async (s) => {
@@ -164,7 +165,7 @@ export function fileRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.put(
     '/api/vms/:vmId/files/content',
-    { preHandler: requireActive, bodyLimit: MAX_EDIT_BYTES + 4096 },
+    { onRequest: requireActive, bodyLimit: MAX_EDIT_BYTES + 4096 },
     async (req) => {
       const { vm, userId } = access(req);
       const body = z
@@ -205,46 +206,50 @@ export function fileRoutes(app: FastifyInstance, ctx: Ctx): void {
     },
   );
 
-  app.get('/api/vms/:vmId/files/download', { preHandler: requireActive }, async (req, reply) => {
-    const { vm, userId } = access(req);
-    const { path } = pathQuery.parse(req.query);
-    const { vmId } = vmParams.parse(req.params);
-    const lease = await ctx.pool.acquire(vmId, sshTargetFor(ctx, vm));
-    try {
-      const s = new Sftp(await lease.sftp());
-      const st = await s.stat(path);
-      if (typeOfMode(st.mode) === 'dir')
-        throw new AppError(
-          400,
-          'is_directory',
-          'Folder tidak bisa diunduh langsung. Kompres dulu lewat menu Arsip, lalu unduh file arsipnya.',
-        );
-      const stream = s.raw.createReadStream(path);
-      const name = baseName(path);
-      reply
-        .header('Content-Type', 'application/octet-stream')
-        .header('Content-Length', st.size)
-        .header(
-          'Content-Disposition',
-          `attachment; filename="${name.replace(/[^\x20-\x7e]|["\\]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(name)}`,
-        )
-        .header('X-Content-Type-Options', 'nosniff');
-      rec(req, vm, userId, 'download', path, { bytes: st.size });
-      stream.on('error', () => reply.raw.destroy());
-      reply.raw.on('close', () => {
-        stream.destroy();
+  app.get(
+    '/api/vms/:vmId/files/download',
+    { config: rateLimit(60), onRequest: requireActive },
+    async (req, reply) => {
+      const { vm, userId } = access(req);
+      const { path } = pathQuery.parse(req.query);
+      const { vmId } = vmParams.parse(req.params);
+      const lease = await ctx.pool.acquire(vmId, sshTargetFor(ctx, vm));
+      try {
+        const s = new Sftp(await lease.sftp());
+        const st = await s.stat(path);
+        if (typeOfMode(st.mode) === 'dir')
+          throw new AppError(
+            400,
+            'is_directory',
+            'Folder tidak bisa diunduh langsung. Kompres dulu lewat menu Arsip, lalu unduh file arsipnya.',
+          );
+        const stream = s.raw.createReadStream(path);
+        const name = baseName(path);
+        reply
+          .header('Content-Type', 'application/octet-stream')
+          .header('Content-Length', st.size)
+          .header(
+            'Content-Disposition',
+            `attachment; filename="${name.replace(/[^\x20-\x7e]|["\\]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+          )
+          .header('X-Content-Type-Options', 'nosniff');
+        rec(req, vm, userId, 'download', path, { bytes: st.size });
+        stream.on('error', () => reply.raw.destroy());
+        reply.raw.on('close', () => {
+          stream.destroy();
+          lease.release();
+        });
+        return reply.send(stream);
+      } catch (e) {
         lease.release();
-      });
-      return reply.send(stream);
-    } catch (e) {
-      lease.release();
-      throw e;
-    }
-  });
+        throw e;
+      }
+    },
+  );
 
   app.put(
     '/api/vms/:vmId/files/upload',
-    { preHandler: requireActive, bodyLimit: maxBytes },
+    { config: rateLimit(120), onRequest: requireActive, bodyLimit: maxBytes },
     async (req) => {
       const { vm, userId } = access(req);
       const q = z
@@ -327,7 +332,7 @@ export function fileRoutes(app: FastifyInstance, ctx: Ctx): void {
     },
   );
 
-  app.post('/api/vms/:vmId/files/mkdir', { preHandler: requireActive }, async (req) => {
+  app.post('/api/vms/:vmId/files/mkdir', { onRequest: requireActive }, async (req) => {
     const { vm, userId } = access(req);
     const { path } = pathQuery.parse(req.body);
     await withSftp(vm, async (s) => {
@@ -339,7 +344,7 @@ export function fileRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { ok: true };
   });
 
-  app.post('/api/vms/:vmId/files/rename', { preHandler: requireActive }, async (req) => {
+  app.post('/api/vms/:vmId/files/rename', { onRequest: requireActive }, async (req) => {
     const { vm, userId } = access(req);
     const { from, to } = z.object({ from: remotePath, to: remotePath }).parse(req.body);
     assertNotProtected(from);
@@ -356,7 +361,7 @@ export function fileRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { ok: true };
   });
 
-  app.post('/api/vms/:vmId/files/delete', { preHandler: requireActive }, async (req) => {
+  app.post('/api/vms/:vmId/files/delete', { onRequest: requireActive }, async (req) => {
     const { vm, userId } = access(req);
     const { path } = pathQuery.parse(req.body);
     assertNotProtected(path);
@@ -374,7 +379,7 @@ export function fileRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { ok: true };
   });
 
-  app.post('/api/vms/:vmId/files/chmod', { preHandler: requireActive }, async (req) => {
+  app.post('/api/vms/:vmId/files/chmod', { onRequest: requireActive }, async (req) => {
     const { vm, userId } = access(req);
     const b = z
       .object({ path: remotePath, mode: modeSchema, recursive: z.boolean().default(false) })
@@ -388,7 +393,7 @@ export function fileRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { ok: true };
   });
 
-  app.post('/api/vms/:vmId/files/chown', { preHandler: requireActive }, async (req) => {
+  app.post('/api/vms/:vmId/files/chown', { onRequest: requireActive }, async (req) => {
     const { vm, userId } = access(req);
     const b = z
       .object({
@@ -421,73 +426,81 @@ export function fileRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { ok: true };
   });
 
-  app.post('/api/vms/:vmId/files/archive', { preHandler: requireActive }, async (req) => {
-    const { vm, userId } = access(req);
-    const b = z
-      .object({ paths: z.array(remotePath).min(1).max(200), dest: remotePath })
-      .parse(req.body);
-    const parent = dirName(b.paths[0]!);
-    if (b.paths.some((p) => dirName(p) !== parent))
-      throw new AppError(
-        400,
-        'mixed_parents',
-        'Semua item yang diarsipkan harus berada di folder yang sama.',
-      );
-    const names = b.paths.map((p) => entryName.parse(baseName(p)));
-    const isZip = b.dest.endsWith('.zip');
-    if (!isZip && !b.dest.endsWith('.tar.gz') && !b.dest.endsWith('.tgz'))
-      throw new AppError(
-        400,
-        'bad_archive_name',
-        'Nama arsip harus berakhiran .zip, .tar.gz, atau .tgz.',
-      );
-    await withVm(ctx, vm, async (lease) => {
-      if (await new Sftp(await lease.sftp()).exists(b.dest))
+  app.post(
+    '/api/vms/:vmId/files/archive',
+    { config: rateLimit(30), onRequest: requireActive },
+    async (req) => {
+      const { vm, userId } = access(req);
+      const b = z
+        .object({ paths: z.array(remotePath).min(1).max(200), dest: remotePath })
+        .parse(req.body);
+      const parent = dirName(b.paths[0]!);
+      if (b.paths.some((p) => dirName(p) !== parent))
         throw new AppError(
-          409,
-          'exists',
-          `"${baseName(b.dest)}" sudah ada. Pilih nama arsip lain.`,
+          400,
+          'mixed_parents',
+          'Semua item yang diarsipkan harus berada di folder yang sama.',
         );
-      const cmd = isZip
-        ? ['zip', '-r', '-q', b.dest, '--', ...names]
-        : ['tar', '-czf', b.dest, '-C', parent, '--', ...names];
-      const r = await execRemote(lease.client, isZip ? inDir(parent, cmd) : cmd, {
-        ...privOpts(vm),
-        timeoutMs: ARCHIVE_TIMEOUT_MS,
+      const names = b.paths.map((p) => entryName.parse(baseName(p)));
+      const isZip = b.dest.endsWith('.zip');
+      if (!isZip && !b.dest.endsWith('.tar.gz') && !b.dest.endsWith('.tgz'))
+        throw new AppError(
+          400,
+          'bad_archive_name',
+          'Nama arsip harus berakhiran .zip, .tar.gz, atau .tgz.',
+        );
+      await withVm(ctx, vm, async (lease) => {
+        if (await new Sftp(await lease.sftp()).exists(b.dest))
+          throw new AppError(
+            409,
+            'exists',
+            `"${baseName(b.dest)}" sudah ada. Pilih nama arsip lain.`,
+          );
+        const cmd = isZip
+          ? ['zip', '-r', '-q', b.dest, '--', ...names]
+          : ['tar', '-czf', b.dest, '-C', parent, '--', ...names];
+        const r = await execRemote(lease.client, isZip ? inDir(parent, cmd) : cmd, {
+          ...privOpts(vm),
+          timeoutMs: ARCHIVE_TIMEOUT_MS,
+        });
+        if (r.code !== 0) {
+          const missing =
+            r.code === 127
+              ? ` Perintah "${cmd[0]}" belum terpasang di VM; pasang lewat menu Aplikasi (Alat dasar).`
+              : '';
+          throw new AppError(
+            422,
+            'archive_failed',
+            `Pembuatan arsip gagal: ${r.stderr.trim().slice(0, 200) || 'tanpa pesan'}.${missing}`,
+          );
+        }
       });
-      if (r.code !== 0) {
-        const missing =
-          r.code === 127
-            ? ` Perintah "${cmd[0]}" belum terpasang di VM; pasang lewat menu Aplikasi (Alat dasar).`
-            : '';
-        throw new AppError(
-          422,
-          'archive_failed',
-          `Pembuatan arsip gagal: ${r.stderr.trim().slice(0, 200) || 'tanpa pesan'}.${missing}`,
-        );
-      }
-    });
-    rec(req, vm, userId, 'archive', b.dest, { items: names.length });
-    return { ok: true };
-  });
+      rec(req, vm, userId, 'archive', b.dest, { items: names.length });
+      return { ok: true };
+    },
+  );
 
-  app.post('/api/vms/:vmId/files/extract', { preHandler: requireActive }, async (req) => {
-    const { vm, userId } = access(req);
-    const b = z.object({ path: remotePath, destDir: remotePath }).parse(req.body);
-    const zip = b.path.endsWith('.zip');
-    if (!zip && !/\.(tar\.gz|tgz|tar)$/.test(b.path))
-      throw new AppError(400, 'bad_archive', 'Format arsip didukung: .zip, .tar.gz, .tgz, .tar.');
-    await withVm(ctx, vm, async (lease) => {
-      const s = new Sftp(await lease.sftp());
-      if (typeOfMode((await s.stat(b.path)).mode) !== 'file')
-        throw new AppError(400, 'not_a_file', `"${b.path}" bukan file arsip.`);
-      await runOk(vm, lease, ['mkdir', '-p', '--', b.destDir]);
-      const cmd = zip
-        ? ['unzip', '-o', '-q', b.path, '-d', b.destDir]
-        : ['tar', '-xf', b.path, '-C', b.destDir];
-      await runOk(vm, lease, cmd, ARCHIVE_TIMEOUT_MS);
-    });
-    rec(req, vm, userId, 'extract', b.path, { destDir: b.destDir });
-    return { ok: true };
-  });
+  app.post(
+    '/api/vms/:vmId/files/extract',
+    { config: rateLimit(30), onRequest: requireActive },
+    async (req) => {
+      const { vm, userId } = access(req);
+      const b = z.object({ path: remotePath, destDir: remotePath }).parse(req.body);
+      const zip = b.path.endsWith('.zip');
+      if (!zip && !/\.(tar\.gz|tgz|tar)$/.test(b.path))
+        throw new AppError(400, 'bad_archive', 'Format arsip didukung: .zip, .tar.gz, .tgz, .tar.');
+      await withVm(ctx, vm, async (lease) => {
+        const s = new Sftp(await lease.sftp());
+        if (typeOfMode((await s.stat(b.path)).mode) !== 'file')
+          throw new AppError(400, 'not_a_file', `"${b.path}" bukan file arsip.`);
+        await runOk(vm, lease, ['mkdir', '-p', '--', b.destDir]);
+        const cmd = zip
+          ? ['unzip', '-o', '-q', b.path, '-d', b.destDir]
+          : ['tar', '-xf', b.path, '-C', b.destDir];
+        await runOk(vm, lease, cmd, ARCHIVE_TIMEOUT_MS);
+      });
+      rec(req, vm, userId, 'extract', b.path, { destDir: b.destDir });
+      return { ok: true };
+    },
+  );
 }

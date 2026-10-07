@@ -10,7 +10,9 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "db:migrate": "tsx --env-file-if-exists=../../.env src/scripts/migrate.ts",
-    "create-admin": "tsx --env-file-if-exists=../../.env src/scripts/create-admin.ts"
+    "create-admin": "tsx --env-file-if-exists=../../.env src/scripts/create-admin.ts",
+    "db:backup": "tsx --env-file-if-exists=../../.env src/scripts/backup-db.ts",
+    "rotate-key": "tsx --env-file-if-exists=../../.env src/scripts/rotate-key.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.2",

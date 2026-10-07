@@ -15,6 +15,7 @@ export function testEnv(overrides: Record<string, string> = {}) {
     DATABASE_PATH: ':memory:',
     SECRETS_MASTER_KEY: Buffer.alloc(32, 7).toString('base64'),
     SESSION_SECRET: 'x'.repeat(40),
+    VM_CHECK_INTERVAL_SEC: '0',
     ...overrides,
   });
 }

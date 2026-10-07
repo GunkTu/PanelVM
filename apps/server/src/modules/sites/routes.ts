@@ -1,3 +1,4 @@
+import { rateLimit } from '../../ratelimit.js';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -152,7 +153,7 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
     await must(vm, lease, RELOAD, 'Memuat ulang nginx');
   }
 
-  app.get('/api/vms/:vmId/sites', { preHandler: requireActive }, async (req) => {
+  app.get('/api/vms/:vmId/sites', { onRequest: requireActive }, async (req) => {
     const { vm } = access(req);
     const rows = db
       .prepare('SELECT * FROM sites WHERE vm_id = ? ORDER BY domain')
@@ -161,7 +162,7 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** Prasyarat untuk membuat situs: nginx dan versi PHP yang terpasang. */
-  app.get('/api/vms/:vmId/sites/options', { preHandler: requireActive }, async (req) => {
+  app.get('/api/vms/:vmId/sites/options', { onRequest: requireActive }, async (req) => {
     const { vm } = access(req);
     return withVm(ctx, vm, async (lease) => {
       const [ng, php, comp] = await Promise.all([
@@ -185,7 +186,7 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
     });
   });
 
-  app.post('/api/vms/:vmId/sites', { preHandler: requireActive }, async (req, reply) => {
+  app.post('/api/vms/:vmId/sites', { onRequest: requireActive }, async (req, reply) => {
     const { vm, userId } = access(req);
     const b = z
       .object({
@@ -272,7 +273,7 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
     return toPublic(loadSite(vm, id));
   });
 
-  app.post('/api/vms/:vmId/sites/:siteId/php', { preHandler: requireActive }, async (req) => {
+  app.post('/api/vms/:vmId/sites/:siteId/php', { onRequest: requireActive }, async (req) => {
     const { vm, userId } = access(req);
     const { siteId } = siteParams.parse(req.params);
     const site = loadSite(vm, siteId);
@@ -299,7 +300,7 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
     return toPublic(loadSite(vm, site.id));
   });
 
-  app.post('/api/vms/:vmId/sites/:siteId/delete', { preHandler: requireActive }, async (req) => {
+  app.post('/api/vms/:vmId/sites/:siteId/delete', { onRequest: requireActive }, async (req) => {
     const { vm, userId } = access(req);
     const { siteId } = siteParams.parse(req.params);
     const site = loadSite(vm, siteId);
@@ -333,28 +334,32 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
   });
 
   /** Perintah artisan dari daftar tetap (Laravel). Keluaran dibatasi 64 KB. */
-  app.post('/api/vms/:vmId/sites/:siteId/artisan', { preHandler: requireActive }, async (req) => {
-    const { vm, userId } = access(req);
-    const { siteId } = siteParams.parse(req.params);
-    const site = loadSite(vm, siteId);
-    if (site.kind !== 'laravel' || !site.php_version)
-      throw new AppError(400, 'not_laravel', 'Perintah artisan hanya untuk situs Laravel.');
-    const { command } = z
-      .object({
-        command: z.enum(Object.keys(ARTISAN_COMMANDS) as [ArtisanCommand, ...ArtisanCommand[]]),
-      })
-      .parse(req.body);
-    const r = await withVm(ctx, vm, (lease) =>
-      exec(
-        vm,
-        lease,
-        phpIn(site.root_path, site.php_version!, ['artisan', ...ARTISAN_COMMANDS[command]]),
-        { timeoutMs: 10 * 60_000 },
-      ),
-    );
-    rec(req, vm, userId, 'artisan', site.domain, r.code === 0 ? 'ok' : 'fail', { command });
-    return { command, code: r.code, output: `${r.stdout}${r.stderr}`.slice(-64 * 1024) };
-  });
+  app.post(
+    '/api/vms/:vmId/sites/:siteId/artisan',
+    { config: rateLimit(30), onRequest: requireActive },
+    async (req) => {
+      const { vm, userId } = access(req);
+      const { siteId } = siteParams.parse(req.params);
+      const site = loadSite(vm, siteId);
+      if (site.kind !== 'laravel' || !site.php_version)
+        throw new AppError(400, 'not_laravel', 'Perintah artisan hanya untuk situs Laravel.');
+      const { command } = z
+        .object({
+          command: z.enum(Object.keys(ARTISAN_COMMANDS) as [ArtisanCommand, ...ArtisanCommand[]]),
+        })
+        .parse(req.body);
+      const r = await withVm(ctx, vm, (lease) =>
+        exec(
+          vm,
+          lease,
+          phpIn(site.root_path, site.php_version!, ['artisan', ...ARTISAN_COMMANDS[command]]),
+          { timeoutMs: 10 * 60_000 },
+        ),
+      );
+      rec(req, vm, userId, 'artisan', site.domain, r.code === 0 ? 'ok' : 'fail', { command });
+      return { command, code: r.code, output: `${r.stdout}${r.stderr}`.slice(-64 * 1024) };
+    },
+  );
 
   const deployQuery = z.object({
     filename: z.string().min(1).max(255),
@@ -443,7 +448,7 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.post(
     '/api/vms/:vmId/sites/:siteId/deploy',
-    { preHandler: requireActive, bodyLimit: maxBytes },
+    { config: rateLimit(10), onRequest: requireActive, bodyLimit: maxBytes },
     async (req) => {
       const { vm, userId } = access(req);
       const { siteId } = siteParams.parse(req.params);
@@ -553,7 +558,7 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.post(
     '/api/vms/:vmId/sites/:siteId/deploy-git',
-    { preHandler: requireActive },
+    { config: rateLimit(10), onRequest: requireActive },
     async (req) => {
       const { vm, userId } = access(req);
       const { siteId } = siteParams.parse(req.params);

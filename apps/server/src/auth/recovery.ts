@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { Db } from '../db/index.js';
-import type { SecretBox } from '../crypto/secrets.js';
+import { hashPassword, verifyPassword } from './passwords.js';
 
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 export const RECOVERY_COUNT = 10;
@@ -15,24 +15,36 @@ function randomChunk(n: number): string {
 
 export const normalizeRecovery = (code: string): string => code.trim().toUpperCase();
 
-/** Ganti semua recovery code user. Kode asli hanya dikembalikan sekali di sini. */
-export function regenerateRecoveryCodes(db: Db, box: SecretBox, userId: string): string[] {
+/**
+ * Ganti semua recovery code user. Kode asli hanya dikembalikan sekali di sini.
+ * Disimpan sebagai hash argon2id (bukan HMAC kunci panel) supaya rotasi master key tidak merusaknya
+ * dan kebocoran DB tidak memudahkan tebak offline.
+ */
+export async function regenerateRecoveryCodes(db: Db, userId: string): Promise<string[]> {
   const codes = Array.from({ length: RECOVERY_COUNT }, () => `${randomChunk(5)}-${randomChunk(5)}`);
+  const hashes = await Promise.all(codes.map((c) => hashPassword(c)));
   db.transaction(() => {
     db.prepare('DELETE FROM recovery_codes WHERE user_id = ?').run(userId);
     const ins = db.prepare('INSERT INTO recovery_codes (id, user_id, code_hash) VALUES (?, ?, ?)');
-    for (const c of codes) ins.run(randomUUID(), userId, box.mac('recovery', c));
+    hashes.forEach((h) => ins.run(randomUUID(), userId, h));
   })();
   return codes;
 }
 
 /** Pakai satu recovery code. Berhasil hanya sekali per kode. */
-export function consumeRecoveryCode(db: Db, box: SecretBox, userId: string, code: string): boolean {
-  const hash = box.mac('recovery', normalizeRecovery(code));
-  const res = db
-    .prepare(
-      'UPDATE recovery_codes SET used_at = ? WHERE user_id = ? AND code_hash = ? AND used_at IS NULL',
-    )
-    .run(Date.now(), userId, hash);
-  return res.changes === 1;
+export async function consumeRecoveryCode(db: Db, userId: string, code: string): Promise<boolean> {
+  const normalized = normalizeRecovery(code);
+  const rows = db
+    .prepare('SELECT id, code_hash FROM recovery_codes WHERE user_id = ? AND used_at IS NULL')
+    .all(userId) as { id: string; code_hash: string }[];
+  for (const row of rows) {
+    if (await verifyPassword(row.code_hash, normalized)) {
+      // Penanda atomik: dua permintaan bersamaan dengan kode yang sama tidak boleh sama-sama lolos.
+      const res = db
+        .prepare('UPDATE recovery_codes SET used_at = ? WHERE id = ? AND used_at IS NULL')
+        .run(Date.now(), row.id);
+      return res.changes === 1;
+    }
+  }
+  return false;
 }

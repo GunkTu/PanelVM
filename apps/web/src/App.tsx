@@ -10,6 +10,8 @@ import { TwoFactorPage } from './features/auth/TwoFactorPage';
 import { AppLayout } from './features/layout/AppLayout';
 import { DatabasesPage } from './features/databases/DatabasesPage';
 import { FilesPage } from './features/files/FilesPage';
+import { MonitoringPage } from './features/monitoring/MonitoringPage';
+import { ServicesPage } from './features/services/ServicesPage';
 import { SitesPage } from './features/sites/SitesPage';
 import { SoftwarePage } from './features/software/SoftwarePage';
 import { VmListPage } from './features/vms/VmListPage';
@@ -46,6 +48,8 @@ export function App() {
         <Route path="/vms/:vmId/databases" element={<DatabasesPage />} />
         <Route path="/vms/:vmId/software" element={<SoftwarePage />} />
         <Route path="/vms/:vmId/sites" element={<SitesPage />} />
+        <Route path="/vms/:vmId/monitoring" element={<MonitoringPage />} />
+        <Route path="/vms/:vmId/services" element={<ServicesPage />} />
         <Route
           path="/admin/vms"
           element={

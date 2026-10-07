@@ -24,7 +24,7 @@ export function userRoutes(app: FastifyInstance, ctx: Ctx): void {
     ctx.terminals.closeByUser(userId, reason);
   }
 
-  app.get('/api/users', { preHandler: requireAdmin }, async () => {
+  app.get('/api/users', { onRequest: requireAdmin }, async () => {
     const rows = db
       .prepare("SELECT * FROM users WHERE role = 'client' ORDER BY email")
       .all() as UserRow[];
@@ -40,7 +40,7 @@ export function userRoutes(app: FastifyInstance, ctx: Ctx): void {
     };
   });
 
-  app.post('/api/users', { preHandler: requireAdmin }, async (req, reply) => {
+  app.post('/api/users', { onRequest: requireAdmin }, async (req, reply) => {
     const body = z
       .object({ email: z.string().trim().email().max(254), password: passwordSchema })
       .parse(req.body);
@@ -67,7 +67,7 @@ export function userRoutes(app: FastifyInstance, ctx: Ctx): void {
     return toPublicUser(user);
   });
 
-  app.patch('/api/users/:id', { preHandler: requireAdmin }, async (req) => {
+  app.patch('/api/users/:id', { onRequest: requireAdmin }, async (req) => {
     const { id } = idParams.parse(req.params);
     const { status } = z.object({ status: z.enum(['active', 'suspended']) }).parse(req.body);
     const user = loadClient(id);
@@ -83,7 +83,7 @@ export function userRoutes(app: FastifyInstance, ctx: Ctx): void {
     return toPublicUser(getUserById(db, id)!);
   });
 
-  app.post('/api/users/:id/reset-2fa', { preHandler: requireAdmin }, async (req) => {
+  app.post('/api/users/:id/reset-2fa', { onRequest: requireAdmin }, async (req) => {
     const { id } = idParams.parse(req.params);
     const user = loadClient(id);
     db.transaction(() => {
@@ -103,7 +103,7 @@ export function userRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { ok: true };
   });
 
-  app.post('/api/users/:id/reset-password', { preHandler: requireAdmin }, async (req) => {
+  app.post('/api/users/:id/reset-password', { onRequest: requireAdmin }, async (req) => {
     const { id } = idParams.parse(req.params);
     const { password } = z.object({ password: passwordSchema }).parse(req.body);
     const user = loadClient(id);
@@ -121,7 +121,7 @@ export function userRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { ok: true };
   });
 
-  app.get('/api/audit', { preHandler: requireAdmin }, async (req) => {
+  app.get('/api/audit', { onRequest: requireAdmin }, async (req) => {
     const q = z
       .object({
         limit: z.coerce.number().int().min(1).max(200).default(50),

@@ -140,7 +140,7 @@ export function authRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.post(
     '/api/auth/2fa/verify',
-    { config: limit(10), preHandler: requireStage('pending_2fa') },
+    { config: limit(10), onRequest: requireStage('pending_2fa') },
     async (req, reply) => {
       const { user, session } = requireAuthed(req);
       const { code } = codeBody.parse(req.body);
@@ -154,7 +154,7 @@ export function authRoutes(app: FastifyInstance, ctx: Ctx): void {
           ok = true;
         }
       } else if (RECOVERY_PATTERN.test(normalizeRecovery(code))) {
-        ok = consumeRecoveryCode(db, box, user.id, code);
+        ok = await consumeRecoveryCode(db, user.id, code);
         if (ok) {
           notify(
             db,
@@ -191,7 +191,7 @@ export function authRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.post(
     '/api/auth/2fa/setup',
-    { config: limit(10), preHandler: requireStage('pending_setup') },
+    { config: limit(10), onRequest: requireStage('pending_setup') },
     async (req) => {
       const { user } = requireAuthed(req);
       const secret = newTotpSecret();
@@ -204,7 +204,7 @@ export function authRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.post(
     '/api/auth/2fa/enable',
-    { config: limit(10), preHandler: requireStage('pending_setup') },
+    { config: limit(10), onRequest: requireStage('pending_setup') },
     async (req, reply) => {
       const { user, session } = requireAuthed(req);
       const { code } = codeBody.parse(req.body);
@@ -238,7 +238,7 @@ export function authRoutes(app: FastifyInstance, ctx: Ctx): void {
         step,
         user.id,
       );
-      const recoveryCodes = regenerateRecoveryCodes(db, box, user.id);
+      const recoveryCodes = await regenerateRecoveryCodes(db, user.id);
       audit.record({ userId: user.id, ip: req.ip, action: 'auth.2fa_enable', result: 'ok' });
       const fresh = { ...user, totp_enabled: 1 };
       return { ...finishLogin(req, reply, fresh, session.id), recoveryCodes };
@@ -263,7 +263,7 @@ export function authRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { ok: true };
   });
 
-  app.post('/api/auth/password', { config: limit(5), preHandler: requireActive }, async (req) => {
+  app.post('/api/auth/password', { config: limit(5), onRequest: requireActive }, async (req) => {
     const user = actor(req);
     const { session } = requireAuthed(req);
     const body = z

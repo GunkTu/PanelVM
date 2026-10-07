@@ -19,10 +19,13 @@ import { SecretBox } from './crypto/secrets.js';
 import { migrate, openDb, type Db } from './db/index.js';
 import { AppError } from './errors.js';
 import { JobService } from './modules/jobs/service.js';
+import { VmWatcher } from './modules/vms/watcher.js';
 import { SshPool } from './ssh/pool.js';
 import { siteRoutes } from './modules/sites/routes.js';
 import { softwareRoutes } from './modules/software/routes.js';
 import { databaseRoutes } from './modules/databases/routes.js';
+import { serviceRoutes } from './modules/services/routes.js';
+import { monitoringRoutes } from './modules/monitoring/routes.js';
 import { fileRoutes } from './modules/files/routes.js';
 import { notificationRoutes } from './modules/notifications/routes.js';
 import { MAX_WS_MESSAGE_BYTES, terminalRoutes } from './modules/terminal/routes.js';
@@ -57,8 +60,11 @@ export async function buildApp(env: Env, opts: BuildOptions = {}): Promise<Built
       db.prepare('UPDATE vms SET status = ? WHERE id = ?').run(online ? 'online' : 'offline', vmId),
     ),
     jobs: undefined as unknown as JobService,
+    watcher: undefined as unknown as VmWatcher,
   };
   ctx.jobs = new JobService(ctx);
+  ctx.watcher = new VmWatcher(ctx, env.VM_CHECK_INTERVAL_SEC * 1000);
+  ctx.watcher.start();
 
   const app = Fastify({
     // IP klien hanya dipercaya dari header proxy bila TRUST_PROXY aktif (di belakang NPM).
@@ -147,6 +153,8 @@ export async function buildApp(env: Env, opts: BuildOptions = {}): Promise<Built
   notificationRoutes(app, ctx);
   terminalRoutes(app, ctx);
   fileRoutes(app, ctx);
+  monitoringRoutes(app, ctx);
+  serviceRoutes(app, ctx);
   databaseRoutes(app, ctx);
   softwareRoutes(app, ctx);
   siteRoutes(app, ctx);
@@ -173,6 +181,7 @@ export async function buildApp(env: Env, opts: BuildOptions = {}): Promise<Built
   app.addHook('onClose', async () => {
     clearInterval(purge);
     clearInterval(retentionTimer);
+    ctx.watcher.stop();
     ctx.pool.closeAll();
     ctx.terminals.closeAll('Server dimatikan');
     if (!existingDb) db.close();

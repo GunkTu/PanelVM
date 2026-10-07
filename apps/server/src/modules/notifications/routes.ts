@@ -14,7 +14,7 @@ interface Row {
 }
 
 export function notificationRoutes(app: FastifyInstance, ctx: Ctx): void {
-  app.get('/api/notifications', { preHandler: requireActive }, async (req) => {
+  app.get('/api/notifications', { onRequest: requireActive }, async (req) => {
     const rows = ctx.db
       .prepare(
         'SELECT id, type, title, message, read_at, created_at FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 100',
@@ -33,14 +33,14 @@ export function notificationRoutes(app: FastifyInstance, ctx: Ctx): void {
     };
   });
 
-  app.post('/api/notifications/read-all', { preHandler: requireActive }, async (req) => {
+  app.post('/api/notifications/read-all', { onRequest: requireActive }, async (req) => {
     ctx.db
       .prepare('UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL')
       .run(Date.now(), actor(req).id);
     return { ok: true };
   });
 
-  app.post('/api/notifications/:id/read', { preHandler: requireActive }, async (req) => {
+  app.post('/api/notifications/:id/read', { onRequest: requireActive }, async (req) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
     // Dibatasi ke user sendiri: notifikasi milik orang lain tidak bisa disentuh.
     const res = ctx.db

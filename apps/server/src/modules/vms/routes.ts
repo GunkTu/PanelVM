@@ -52,7 +52,7 @@ export function vmRoutes(app: FastifyInstance, ctx: Ctx): void {
   const logSsh = (req: { log: { warn: (o: unknown, m: string) => void } }) => (e: Error) =>
     req.log.warn({ err: e.message }, 'ssh error');
 
-  app.get('/api/vms', { preHandler: requireActive }, async (req) => {
+  app.get('/api/vms', { onRequest: requireActive }, async (req) => {
     const user = actor(req);
     const rows =
       user.role === 'admin'
@@ -65,14 +65,14 @@ export function vmRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { items: rows.map((v) => toPublicVm(ctx, v, user.role === 'admin')) };
   });
 
-  app.get('/api/vms/:id', { preHandler: requireActive }, async (req) => {
+  app.get('/api/vms/:id', { onRequest: requireActive }, async (req) => {
     const { id } = idParams.parse(req.params);
     const user = actor(req);
     const vm = assertVmAccess(db, user, id);
     return toPublicVm(ctx, vm, user.role === 'admin');
   });
 
-  app.post('/api/vms', { preHandler: requireAdmin }, async (req, reply) => {
+  app.post('/api/vms', { onRequest: requireAdmin }, async (req, reply) => {
     const body = createBody.parse(req.body);
     if (db.prepare('SELECT 1 AS ok FROM vms WHERE name = ?').get(body.name)) {
       throw new AppError(409, 'vm_name_taken', 'Nama VM sudah dipakai. Pilih nama lain.');
@@ -105,7 +105,7 @@ export function vmRoutes(app: FastifyInstance, ctx: Ctx): void {
     return toPublicVm(ctx, getVm(id)!, true);
   });
 
-  app.patch('/api/vms/:id', { preHandler: requireAdmin }, async (req) => {
+  app.patch('/api/vms/:id', { onRequest: requireAdmin }, async (req) => {
     const { id } = idParams.parse(req.params);
     const body = patchBody.parse(req.body);
     const vm = getVm(id);
@@ -151,7 +151,7 @@ export function vmRoutes(app: FastifyInstance, ctx: Ctx): void {
     return toPublicVm(ctx, getVm(id)!, true);
   });
 
-  app.delete('/api/vms/:id', { preHandler: requireAdmin }, async (req) => {
+  app.delete('/api/vms/:id', { onRequest: requireAdmin }, async (req) => {
     const { id } = idParams.parse(req.params);
     const vm = getVm(id);
     if (!vm) throw notFound('VM');
@@ -171,7 +171,7 @@ export function vmRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.post(
     '/api/vms/:id/host-key/scan',
-    { config: { rateLimit: { max: 10, timeWindow: '1 minute' } }, preHandler: requireAdmin },
+    { config: { rateLimit: { max: 10, timeWindow: '1 minute' } }, onRequest: requireAdmin },
     async (req) => {
       const { id } = idParams.parse(req.params);
       const vm = getVm(id);
@@ -187,7 +187,7 @@ export function vmRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.post(
     '/api/vms/:id/host-key/approve',
-    { config: { rateLimit: { max: 10, timeWindow: '1 minute' } }, preHandler: requireAdmin },
+    { config: { rateLimit: { max: 10, timeWindow: '1 minute' } }, onRequest: requireAdmin },
     async (req) => {
       const { id } = idParams.parse(req.params);
       const { fingerprint } = fingerprintBody.parse(req.body);
@@ -220,7 +220,7 @@ export function vmRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.post(
     '/api/vms/:id/test',
-    { config: { rateLimit: { max: 10, timeWindow: '1 minute' } }, preHandler: requireAdmin },
+    { config: { rateLimit: { max: 10, timeWindow: '1 minute' } }, onRequest: requireAdmin },
     async (req) => {
       const { id } = idParams.parse(req.params);
       const vm = getVm(id);
@@ -250,7 +250,7 @@ export function vmRoutes(app: FastifyInstance, ctx: Ctx): void {
     },
   );
 
-  app.put('/api/vms/:id/assignment', { preHandler: requireAdmin }, async (req) => {
+  app.put('/api/vms/:id/assignment', { onRequest: requireAdmin }, async (req) => {
     const { id } = idParams.parse(req.params);
     const { userId } = z.object({ userId: z.string().uuid().nullable() }).parse(req.body);
     const vm = getVm(id);
