@@ -28,7 +28,7 @@ Dokumen ini memisahkan dengan jelas **apa yang sudah teruji** dan **apa yang har
    sudo -u panelvm node --env-file=/etc/panelvm/panel.env dist/scripts/create-admin.js   # interaktif
    ```
    Admin mengaktifkan 2FA saat login pertama. (`npm run db:migrate`/`create-admin` untuk pengembangan memakai `.env` di root repo.)
-7. **systemd**: salin `deploy/panelvm.service`, `deploy/panelvm-backup.service`, `deploy/panelvm-backup.timer` ke `/etc/systemd/system/`, lalu `systemctl daemon-reload && systemctl enable --now panelvm panelvm-backup.timer`. Cek hardening dengan `systemd-analyze security panelvm.service`. **[belum diuji di systemd nyata]** (sintaks terverifikasi dengan `systemd-analyze verify`).
+7. **systemd**: salin `deploy/panelvm.service`, `deploy/panelvm-backup.service`, `deploy/panelvm-backup.timer` ke `/etc/systemd/system/`, lalu `systemctl daemon-reload && systemctl enable --now panelvm panelvm-backup.timer`. Cek hardening dengan `systemd-analyze security panelvm.service`. Jika panel crash terus saat start, lihat `journalctl -u panelvm -n 50` (restart otomatis tiap 3 detik membuatnya tampak "running" padahal tidak mendengarkan di port). Catatan: unit wajib mengizinkan `AF_NETLINK` di `RestrictAddressFamilies`, kalau tidak Node gagal dengan "Unknown system error 97". **[belum diuji di systemd nyata]** (sintaks terverifikasi dengan `systemd-analyze verify`).
 8. **NPM**: lihat bagian berikut.
 9. **Firewall**: lihat bagian berikut.
 10. **Uji penerimaan**: login dengan 2FA, buat VM + setujui host key, buka terminal, uji isolasi (client A tidak bisa membuka VM B), suspend akun, dan uji dari **dalam VM client** bahwa VM panel/Proxmox tidak terjangkau.

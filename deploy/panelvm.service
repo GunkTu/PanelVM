@@ -29,7 +29,9 @@ ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
 ReadWritePaths=/var/lib/panel
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# AF_NETLINK wajib: Node membaca daftar interface jaringan lewat soket netlink (tanpa ini panel crash
+# dengan "Unknown system error 97" saat start; ditemukan di uji pertama pada Ubuntu nyata).
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 RestrictNamespaces=true
 RestrictRealtime=true
 LockPersonality=true
