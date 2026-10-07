@@ -1,7 +1,15 @@
 import type { Db } from '../db/index.js';
 import { AppError, forbidden, notFound } from '../errors.js';
 
-export const VM_MODULES = ['terminal', 'files', 'database', 'monitoring', 'services'] as const;
+export const VM_MODULES = [
+  'terminal',
+  'files',
+  'database',
+  'monitoring',
+  'services',
+  'software',
+  'sites',
+] as const;
 export type VmModule = (typeof VM_MODULES)[number];
 export type ModulesEnabled = Record<VmModule, boolean>;
 

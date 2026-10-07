@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 import { Audit } from './audit/index.js';
+import { purgeOld } from './audit/retention.js';
 import { authHook } from './auth/plugin.js';
 import { authRoutes } from './auth/routes.js';
 import { SessionService } from './auth/sessions.js';
@@ -17,6 +18,12 @@ import type { Ctx } from './context.js';
 import { SecretBox } from './crypto/secrets.js';
 import { migrate, openDb, type Db } from './db/index.js';
 import { AppError } from './errors.js';
+import { JobService } from './modules/jobs/service.js';
+import { SshPool } from './ssh/pool.js';
+import { siteRoutes } from './modules/sites/routes.js';
+import { softwareRoutes } from './modules/software/routes.js';
+import { databaseRoutes } from './modules/databases/routes.js';
+import { fileRoutes } from './modules/files/routes.js';
 import { notificationRoutes } from './modules/notifications/routes.js';
 import { MAX_WS_MESSAGE_BYTES, terminalRoutes } from './modules/terminal/routes.js';
 import { TerminalRegistry } from './modules/terminal/registry.js';
@@ -46,7 +53,12 @@ export async function buildApp(env: Env, opts: BuildOptions = {}): Promise<Built
     audit: new Audit(db),
     sessions: new SessionService(db, box, env.SESSION_SECRET),
     terminals: new TerminalRegistry(),
+    pool: new SshPool((vmId, online) =>
+      db.prepare('UPDATE vms SET status = ? WHERE id = ?').run(online ? 'online' : 'offline', vmId),
+    ),
+    jobs: undefined as unknown as JobService,
   };
+  ctx.jobs = new JobService(ctx);
 
   const app = Fastify({
     // IP klien hanya dipercaya dari header proxy bila TRUST_PROXY aktif (di belakang NPM).
@@ -92,6 +104,7 @@ export async function buildApp(env: Env, opts: BuildOptions = {}): Promise<Built
   });
   await app.register(websocket, { options: { maxPayload: MAX_WS_MESSAGE_BYTES + 1024 } });
 
+  ctx.log = app.log;
   app.decorateRequest('auth', null);
   app.addHook('onRequest', authHook(ctx));
 
@@ -133,6 +146,10 @@ export async function buildApp(env: Env, opts: BuildOptions = {}): Promise<Built
   vmRoutes(app, ctx);
   notificationRoutes(app, ctx);
   terminalRoutes(app, ctx);
+  fileRoutes(app, ctx);
+  databaseRoutes(app, ctx);
+  softwareRoutes(app, ctx);
+  siteRoutes(app, ctx);
 
   // Produksi: sajikan SPA dari origin yang sama dengan API (tanpa CORS).
   const webDist = join(dirname(fileURLToPath(import.meta.url)), '../../web/dist');
@@ -149,8 +166,14 @@ export async function buildApp(env: Env, opts: BuildOptions = {}): Promise<Built
 
   const purge = setInterval(() => ctx.sessions.purgeExpired(), 10 * 60 * 1000);
   purge.unref();
+  const retention = () => purgeOld(db, env.AUDIT_RETENTION_DAYS);
+  retention();
+  const retentionTimer = setInterval(retention, 24 * 60 * 60 * 1000);
+  retentionTimer.unref();
   app.addHook('onClose', async () => {
     clearInterval(purge);
+    clearInterval(retentionTimer);
+    ctx.pool.closeAll();
     ctx.terminals.closeAll('Server dimatikan');
     if (!existingDb) db.close();
   });

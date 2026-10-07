@@ -1,6 +1,7 @@
 import type { Ctx } from '../../context.js';
 import { parseModules, type ModulesEnabled, type VmRow } from '../../rbac/index.js';
 import { openSsh, type SshTarget } from '../../ssh/connect.js';
+import type { Lease } from '../../ssh/pool.js';
 
 export const vmKeyContext = (vmId: string): string => `vms.ssh_private_key:${vmId}`;
 
@@ -68,3 +69,18 @@ export async function testVm(ctx: Ctx, vm: VmRow, log: (e: Error) => void): Prom
     throw e;
   }
 }
+
+/** Pinjam koneksi SSH bersama untuk VM ini, dan pastikan dilepas setelah selesai. */
+export async function withVm<T>(ctx: Ctx, vm: VmRow, fn: (lease: Lease) => Promise<T>): Promise<T> {
+  const lease = await ctx.pool.acquire(vm.id, sshTargetFor(ctx, vm), (e) =>
+    ctx.log?.warn({ err: e.message }, 'ssh pool error'),
+  );
+  try {
+    return await fn(lease);
+  } finally {
+    lease.release();
+  }
+}
+
+/** Opsi exec: user non-root memakai sudo -n. */
+export const privOpts = (vm: VmRow): { sudo: boolean } => ({ sudo: vm.ssh_user !== 'root' });

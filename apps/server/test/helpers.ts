@@ -8,18 +8,22 @@ import { loadEnv } from '../src/config/env.js';
 export const ORIGIN = 'https://panel.contoh.com';
 export const PASSWORD = 'kata-sandi-panjang-123';
 
-export function testEnv() {
+export function testEnv(overrides: Record<string, string> = {}) {
   return loadEnv({
     NODE_ENV: 'test',
     APP_ORIGIN: ORIGIN,
     DATABASE_PATH: ':memory:',
     SECRETS_MASTER_KEY: Buffer.alloc(32, 7).toString('base64'),
     SESSION_SECRET: 'x'.repeat(40),
+    ...overrides,
   });
 }
 
-export async function makeApp(rateLimit = false): Promise<BuiltApp> {
-  const built = await buildApp(testEnv(), { rateLimit });
+export async function makeApp(
+  rateLimit = false,
+  envOverrides: Record<string, string> = {},
+): Promise<BuiltApp> {
+  const built = await buildApp(testEnv(envOverrides), { rateLimit });
   await built.app.ready();
   return built;
 }

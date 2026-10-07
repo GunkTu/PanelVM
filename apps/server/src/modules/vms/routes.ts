@@ -79,13 +79,7 @@ export function vmRoutes(app: FastifyInstance, ctx: Ctx): void {
     }
     const id = randomUUID();
     const pair = generateKeyPair(`panel-${id.slice(0, 8)}`);
-    const modules = body.modules ?? {
-      terminal: true,
-      files: true,
-      database: true,
-      monitoring: true,
-      services: true,
-    };
+    const modules = body.modules ?? Object.fromEntries(VM_MODULES.map((m) => [m, true]));
     db.prepare(
       'INSERT INTO vms (id, name, host, ssh_port, ssh_user, ssh_private_key_enc, ssh_public_key, modules_enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     ).run(
@@ -162,6 +156,7 @@ export function vmRoutes(app: FastifyInstance, ctx: Ctx): void {
     const vm = getVm(id);
     if (!vm) throw notFound('VM');
     ctx.terminals.closeByVm(id, 'VM dihapus dari panel');
+    ctx.pool.invalidate(id);
     db.prepare('DELETE FROM vms WHERE id = ?').run(id);
     audit.record({
       userId: actor(req).id,
@@ -209,6 +204,7 @@ export function vmRoutes(app: FastifyInstance, ctx: Ctx): void {
       }
       db.prepare('UPDATE vms SET host_key_fingerprint = ? WHERE id = ?').run(fingerprint, id);
       ctx.terminals.closeByVm(id, 'Host key disetujui ulang');
+      ctx.pool.invalidate(id);
       audit.record({
         userId: actor(req).id,
         vmId: id,
@@ -287,6 +283,7 @@ export function vmRoutes(app: FastifyInstance, ctx: Ctx): void {
         );
     })();
     ctx.terminals.closeByVm(id, 'Akses VM diubah admin');
+    ctx.pool.invalidate(id);
     if (userId)
       notify(
         db,

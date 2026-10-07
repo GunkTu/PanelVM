@@ -231,3 +231,132 @@ describe('terminal', () => {
     await closed2;
   });
 });
+
+describe('otorisasi modul Fase 2 (matriks IDOR, tanpa VM nyata)', () => {
+  const U = '/api/vms';
+  const fakeSite = '11111111-1111-4111-8111-111111111111';
+  const routes: [string, string][] = [
+    ['GET', 'files/list?path=/tmp'],
+    ['GET', 'files/content?path=/tmp/x'],
+    ['GET', 'files/download?path=/tmp/x'],
+    ['POST', 'files/mkdir'],
+    ['POST', 'files/delete'],
+    ['POST', 'files/rename'],
+    ['POST', 'files/chmod'],
+    ['POST', 'files/chown'],
+    ['POST', 'files/archive'],
+    ['POST', 'files/extract'],
+    ['PUT', 'files/content'],
+    ['PUT', 'files/upload?path=/tmp/x'],
+    ['GET', 'databases'],
+    ['GET', 'databases/engines'],
+    ['GET', 'databases/export?database=abc'],
+    ['POST', 'databases'],
+    ['POST', 'databases/drop'],
+    ['POST', 'databases/users'],
+    ['POST', 'databases/users/password'],
+    ['POST', 'databases/users/drop'],
+    ['POST', 'databases/grant'],
+    ['POST', 'databases/revoke'],
+    ['POST', 'databases/query'],
+    ['POST', 'databases/import?database=abc'],
+    ['GET', 'software'],
+    ['POST', 'software/install'],
+    ['POST', 'software/apt-update'],
+    ['GET', 'jobs'],
+    ['GET', `jobs/${fakeSite}`],
+    ['GET', 'sites'],
+    ['GET', 'sites/options'],
+    ['POST', 'sites'],
+    ['POST', `sites/${fakeSite}/php`],
+    ['POST', `sites/${fakeSite}/delete`],
+    ['POST', `sites/${fakeSite}/artisan`],
+    ['POST', `sites/${fakeSite}/deploy?filename=a.zip`],
+    ['POST', `sites/${fakeSite}/deploy-git`],
+  ];
+
+  const hit = (c: Client, method: string, vm: string, path: string) =>
+    app.inject({
+      method: method as 'GET',
+      url: `${U}/${vm}/${path}`,
+      headers: {
+        origin: ORIGIN,
+        cookie: c.cookie,
+        'x-csrf-token': c.csrf,
+        ...(method !== 'GET'
+          ? {
+              'content-type':
+                path.includes('upload') || path.includes('import') || path.includes('deploy?')
+                  ? 'application/octet-stream'
+                  : 'application/json',
+            }
+          : {}),
+      },
+      ...(method !== 'GET'
+        ? {
+            payload:
+              path.includes('upload') || path.includes('import') || path.includes('deploy?')
+                ? Buffer.from('x')
+                : ('{}' as never),
+          }
+        : {}),
+    });
+
+  it('client yang bukan pemilik selalu mendapat 404 di semua endpoint modul', async () => {
+    for (const [m, p] of routes) {
+      const res = await hit(b, m, vmA, p);
+      expect(res.statusCode, `${m} ${p}`).toBe(404);
+    }
+  });
+
+  it('tanpa sesi: semua endpoint modul 401', async () => {
+    for (const [m, p] of routes) {
+      const res = await app.inject({
+        method: m as 'GET',
+        url: `${U}/${vmA}/${p}`,
+        headers: { origin: ORIGIN },
+      });
+      expect(res.statusCode, `${m} ${p}`).toBe(401);
+    }
+  });
+
+  it('modul yang dimatikan memberi 403 walau pemanggil admin', async () => {
+    const off =
+      '{"terminal":true,"files":false,"database":false,"monitoring":false,"services":false,"software":false,"sites":false}';
+    ctx.db.prepare('UPDATE vms SET modules_enabled = ? WHERE id = ?').run(off, vmB);
+    for (const [m, p] of routes.filter(([, p]) => !p.startsWith('jobs'))) {
+      const res = await hit(admin, m, vmB, p);
+      expect(res.statusCode, `${m} ${p}`).toBe(403);
+    }
+    ctx.db
+      .prepare('UPDATE vms SET modules_enabled = ? WHERE id = ?')
+      .run(
+        JSON.stringify(
+          Object.fromEntries(
+            ['terminal', 'files', 'database', 'monitoring', 'services', 'software', 'sites'].map(
+              (k) => [k, true],
+            ),
+          ),
+        ),
+        vmB,
+      );
+  });
+
+  it('client tidak bisa mengaktifkan modul sendiri lewat PATCH VM (403)', async () => {
+    expect(
+      (
+        await call(app, b, 'PATCH', `${U}/${vmB}`, {
+          modules: {
+            terminal: true,
+            files: true,
+            database: true,
+            monitoring: true,
+            services: true,
+            software: true,
+            sites: true,
+          },
+        })
+      ).statusCode,
+    ).toBe(403);
+  });
+});
