@@ -1,0 +1,32 @@
+@import 'tailwindcss';
+
+/* Design tokens (CLAUDE.md bagian 8). Teks kuning TIDAK dipakai di atas latar putih. */
+@theme {
+  --color-navy: #0b1f4b;
+  --color-navy-dark: #071536;
+  --color-white: #ffffff;
+  --color-yellow: #f5b700;
+  --color-yellow-dark: #d9a000;
+  --color-success: #15803d;
+  --color-error: #b91c1c;
+  --color-warning: #a16207;
+  --color-info: #1d4ed8;
+  --font-sans: ui-sans-serif, system-ui, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+}
+
+body {
+  @apply bg-white font-sans text-slate-800 antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-yellow);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
