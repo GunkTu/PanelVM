@@ -52,6 +52,14 @@ const schema = z.object({
   SMTP_PASS: z.string().optional(),
   SMTP_FROM: z.string().optional(),
   TRUST_PROXY: trustProxySchema,
+  /**
+   * HANYA untuk uji lewat IP lokal tanpa HTTPS. Cookie sesi tidak lagi `Secure`/`__Host-`, jadi password dan
+   * sesi berjalan sebagai teks biasa di jaringan. JANGAN dipakai bila panel bisa dijangkau dari internet.
+   */
+  INSECURE_HTTP: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
   /** Retensi audit log (hari). Catatan lebih lama dihapus otomatis. */
   AUDIT_RETENTION_DAYS: z.coerce.number().int().min(7).max(3650).default(90),
   /** Interval pemeriksaan status VM (detik). 0 = nonaktif. */
@@ -72,6 +80,15 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
     const lines = result.error.issues.map((i) => `- ${i.path.join('.')}: ${i.message}`);
     throw new EnvError(
       `Konfigurasi environment tidak valid. Perbaiki variabel berikut di .env:\n${lines.join('\n')}`,
+    );
+  }
+  if (
+    result.success &&
+    result.data.INSECURE_HTTP &&
+    !result.data.APP_ORIGIN.startsWith('http://')
+  ) {
+    throw new EnvError(
+      'Konfigurasi environment tidak valid. Perbaiki variabel berikut di .env:\n- INSECURE_HTTP: hanya boleh dipakai bila APP_ORIGIN diawali http:// (contoh http://192.168.1.50:3000). Untuk https:// hapus INSECURE_HTTP.',
     );
   }
   return result.data;

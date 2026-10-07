@@ -33,6 +33,18 @@ Dokumen ini memisahkan dengan jelas **apa yang sudah teruji** dan **apa yang har
 9. **Firewall**: lihat bagian berikut.
 10. **Uji penerimaan**: login dengan 2FA, buat VM + setujui host key, buka terminal, uji isolasi (client A tidak bisa membuka VM B), suspend akun, dan uji dari **dalam VM client** bahwa VM panel/Proxmox tidak terjangkau.
 
+## Uji lewat IP lokal tanpa HTTPS (sementara)
+
+Sebelum domain dan NPM siap, panel bisa dites lewat `http://<IP-VM-panel>:3000` di jaringan lokal:
+
+```
+APP_ORIGIN=http://192.168.1.50:3000     # persis alamat yang diketik di browser (IP dan port)
+INSECURE_HTTP=true
+TRUST_PROXY=false
+```
+
+`INSECURE_HTTP` membuat cookie sesi tanpa `Secure`/`__Host-` (browser menolak cookie aman di HTTP biasa). Konsekuensinya password, kode 2FA, dan sesi berjalan sebagai **teks biasa** di jaringan. Pakai hanya di LAN tepercaya, **jangan** buka port 3000 ke internet, dan hapus `INSECURE_HTTP` begitu pindah ke domain + HTTPS (ganti `APP_ORIGIN` ke `https://...`). Panel menolak start bila `INSECURE_HTTP=true` tetapi `APP_ORIGIN` berawalan `https://`. Teruji di level test; belum dicoba dari browser di jaringan Anda.
+
 ## Nginx Proxy Manager
 
 - Proxy host `vm.thegt.my.id` ke `http://<IP VM panel>:3000`. Aktifkan **Websockets Support** (terminal), SSL Let's Encrypt, dan **Force SSL**. Antarmuka admin NPM (port 81) jangan terbuka ke internet.

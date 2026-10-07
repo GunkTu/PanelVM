@@ -16,8 +16,11 @@ declare module 'fastify' {
   }
 }
 
-export const cookieName = (ctx: Ctx): string =>
-  ctx.env.NODE_ENV === 'production' ? '__Host-sid' : 'sid';
+/** Cookie aman (Secure + prefiks __Host-) di produksi, kecuali mode uji HTTP lokal (INSECURE_HTTP). */
+export const secureCookies = (ctx: Ctx): boolean =>
+  ctx.env.NODE_ENV === 'production' && !ctx.env.INSECURE_HTTP;
+
+export const cookieName = (ctx: Ctx): string => (secureCookies(ctx) ? '__Host-sid' : 'sid');
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 export const LOGIN_PATH = '/api/auth/login';
@@ -30,7 +33,7 @@ export function setSessionCookie(
 ): void {
   reply.setCookie(cookieName(ctx), token, {
     httpOnly: true,
-    secure: ctx.env.NODE_ENV === 'production',
+    secure: secureCookies(ctx),
     sameSite: 'strict',
     path: '/',
     ...(maxAgeMs ? { maxAge: Math.floor(maxAgeMs / 1000) } : {}),

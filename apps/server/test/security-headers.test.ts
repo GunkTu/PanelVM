@@ -92,3 +92,48 @@ describe('header dan kebocoran informasi', () => {
     await built.app.close();
   });
 });
+
+describe('mode uji HTTP lokal (INSECURE_HTTP)', () => {
+  const base = {
+    NODE_ENV: 'production',
+    APP_ORIGIN: 'http://192.168.1.50:3000',
+    INSECURE_HTTP: 'true',
+  };
+
+  it('cookie memakai nama sid tanpa Secure, tetap HttpOnly dan SameSite=Strict, dan login berfungsi', async () => {
+    const built = await buildApp(testEnv(base), { rateLimit: false });
+    await built.app.ready();
+    const u = await seedUser(built, 'lan@contoh.com');
+    const res = await built.app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      headers: { origin: 'http://192.168.1.50:3000' },
+      payload: { email: u.email, password: PASSWORD },
+    });
+    expect(res.statusCode).toBe(200);
+    const cookie = String(res.headers['set-cookie']);
+    expect(cookie).toMatch(/^sid=/);
+    expect(cookie).not.toMatch(/Secure/i);
+    expect(cookie).toMatch(/HttpOnly/i);
+    expect(cookie).toMatch(/SameSite=Strict/i);
+    const me = await built.app.inject({
+      method: 'GET',
+      url: '/api/auth/me',
+      headers: { cookie: cookie.split(';')[0]! },
+    });
+    expect(me.statusCode).toBe(200);
+    await built.app.close();
+  });
+
+  it('ditolak bila APP_ORIGIN memakai https:// (agar tidak salah dipakai di produksi)', () => {
+    expect(() => testEnv({ ...base, APP_ORIGIN: 'https://vm.thegt.my.id' })).toThrow(
+      /INSECURE_HTTP/,
+    );
+  });
+
+  it('default tetap aman: tanpa INSECURE_HTTP cookie __Host- + Secure', async () => {
+    expect(
+      testEnv({ NODE_ENV: 'production', APP_ORIGIN: 'https://vm.thegt.my.id' }).INSECURE_HTTP,
+    ).toBe(false);
+  });
+});

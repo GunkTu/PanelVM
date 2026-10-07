@@ -5,6 +5,7 @@ import { AppError } from '../errors.js';
 import { notify } from '../modules/notifications/service.js';
 import {
   actor,
+  cookieName,
   clearSessionCookie,
   requireActive,
   requireAuthed,
@@ -90,7 +91,7 @@ export function authRoutes(app: FastifyInstance, ctx: Ctx): void {
     if (!body.success) throw GENERIC_LOGIN_ERROR;
     const { email, password } = body.data;
 
-    const old = req.cookies[ctx.env.NODE_ENV === 'production' ? '__Host-sid' : 'sid'];
+    const old = req.cookies[cookieName(ctx)];
     if (old) {
       const s = sessions.resolve(old);
       if (s) sessions.destroy(s.id);
