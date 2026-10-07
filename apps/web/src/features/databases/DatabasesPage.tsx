@@ -17,7 +17,8 @@ import type { Credentials } from '../../lib/types';
 import { uploadRaw } from '../../lib/upload';
 import { useVmId } from '../layout/useVmId';
 
-interface Engine {
+type EngineKey = 'mysql' | 'postgres';
+interface EngineInfo {
   engine: string;
   flavor: string;
   version: string;
@@ -86,20 +87,26 @@ function CredentialsModal({ cred, onClose }: { cred: Credentials; onClose: () =>
 
 function QueryEditor({
   vmId,
+  engine,
   databases,
   initial,
   onClose,
 }: {
   vmId: string;
+  engine: EngineKey;
   databases: string[];
   initial: string | null;
   onClose: () => void;
 }) {
   const [db, setDb] = useState<string>(initial ?? '');
-  const [sql, setSql] = useState('SHOW TABLES;');
+  const [sql, setSql] = useState(
+    engine === 'postgres'
+      ? "SELECT tablename FROM pg_tables WHERE schemaname = 'public';"
+      : 'SHOW TABLES;',
+  );
   const run = useMutation({
     mutationFn: () =>
-      api<QueryResult>(`/api/vms/${vmId}/databases/query`, {
+      api<QueryResult>(`/api/vms/${vmId}/databases/query?engine=${engine}`, {
         method: 'POST',
         body: { database: db || null, sql },
       }),
@@ -197,14 +204,19 @@ export function DatabasesPage() {
   const engines = useQuery({
     queryKey: ['db-engines', vmId],
     retry: false,
-    queryFn: () => api<{ engines: Engine[] }>(`${base}/engines`),
+    queryFn: () => api<{ engines: EngineInfo[] }>(`${base}/engines`),
   });
-  const mysql = engines.data?.engines.find((e) => e.engine === 'mysql');
+  const infoOf = (k: EngineKey) => engines.data?.engines.find((e) => e.engine === k);
+  const [chosen, setChosen] = useState<EngineKey | null>(null);
+  const engine: EngineKey =
+    chosen ??
+    (infoOf('mysql')?.managed ? 'mysql' : infoOf('postgres')?.managed ? 'postgres' : 'mysql');
+  const mysql = infoOf(engine); // info engine yang sedang dipilih
   const overview = useQuery({
-    queryKey: ['db-overview', vmId],
+    queryKey: ['db-overview', vmId, engine],
     enabled: mysql?.managed === true,
     retry: false,
-    queryFn: () => api<Overview>(base),
+    queryFn: () => api<Overview>(`${base}?engine=${engine}`),
   });
 
   const [creating, setCreating] = useState(false);
@@ -225,7 +237,7 @@ export function DatabasesPage() {
 
   const create = useMutation({
     mutationFn: () =>
-      api<{ credentials: Credentials | null }>(base, {
+      api<{ credentials: Credentials | null }>(`${base}?engine=${engine}`, {
         method: 'POST',
         body: { name: form.name, ...(form.withUser ? { user: form.user || undefined } : {}) },
       }),
@@ -240,7 +252,7 @@ export function DatabasesPage() {
   });
   const createUser = useMutation({
     mutationFn: () =>
-      api<{ credentials: Credentials }>(`${base}/users`, {
+      api<{ credentials: Credentials }>(`${base}/users?engine=${engine}`, {
         method: 'POST',
         body: { name: newUser },
       }),
@@ -253,7 +265,7 @@ export function DatabasesPage() {
   });
   const resetPw = useMutation({
     mutationFn: (name: string) =>
-      api<{ credentials: Credentials }>(`${base}/users/password`, {
+      api<{ credentials: Credentials }>(`${base}/users/password?engine=${engine}`, {
         method: 'POST',
         body: { name },
       }),
@@ -262,7 +274,7 @@ export function DatabasesPage() {
   });
   const drop = useMutation({
     mutationFn: (v: { kind: 'db' | 'user'; name: string }) =>
-      api(`${base}/${v.kind === 'db' ? 'drop' : 'users/drop'}`, {
+      api(`${base}/${v.kind === 'db' ? 'drop' : 'users/drop'}?engine=${engine}`, {
         method: 'POST',
         body: { name: v.name, confirm: v.name },
       }),
@@ -276,7 +288,7 @@ export function DatabasesPage() {
   });
   const doGrant = useMutation({
     mutationFn: () =>
-      api(`${base}/grant`, {
+      api(`${base}/grant?engine=${engine}`, {
         method: 'POST',
         body: { user: grantFor?.name, database: grant.database, level: grant.level },
       }),
@@ -289,7 +301,7 @@ export function DatabasesPage() {
   });
   const revoke = useMutation({
     mutationFn: (v: { user: string; database: string }) =>
-      api(`${base}/revoke`, { method: 'POST', body: v }),
+      api(`${base}/revoke?engine=${engine}`, { method: 'POST', body: v }),
     onSuccess: async () => {
       toast.show('success', 'Hak akses dicabut.');
       await refresh();
@@ -303,7 +315,7 @@ export function DatabasesPage() {
     try {
       await uploadRaw(
         'POST',
-        `${base}/import?database=${encodeURIComponent(importDb)}`,
+        `${base}/import?database=${encodeURIComponent(importDb)}&engine=${engine}`,
         f,
         setProgress,
       );
@@ -333,6 +345,34 @@ export function DatabasesPage() {
         )}
       </div>
 
+      {engines.data && (
+        <div role="tablist" aria-label="Engine database" className="mt-3 flex gap-2">
+          {(['mysql', 'postgres'] as const).map((k) => {
+            const i = infoOf(k);
+            const label =
+              k === 'postgres'
+                ? 'PostgreSQL'
+                : i?.flavor === 'mariadb'
+                  ? 'MariaDB'
+                  : i?.flavor === 'mysql' && i.version
+                    ? 'MySQL'
+                    : 'MySQL / MariaDB';
+            return (
+              <button
+                key={k}
+                type="button"
+                role="tab"
+                aria-selected={engine === k}
+                onClick={() => setChosen(k)}
+                className={`rounded-md border px-3 py-1.5 text-sm ${engine === k ? 'border-navy bg-navy text-white' : 'border-slate-300 hover:border-navy'}`}
+              >
+                {label} {i?.version ?? ''}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {engines.isLoading && <Skeleton className="mt-4 h-20" />}
       {engines.error && (
         <p role="alert" className="mt-4 rounded-md border border-error bg-red-50 p-3 text-red-900">
@@ -341,31 +381,33 @@ export function DatabasesPage() {
       )}
       {engines.data && (
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          {engines.data.engines.map((e) => (
-            <div key={e.engine} className="rounded-lg border border-slate-200 p-4">
-              <div className="flex items-center justify-between">
-                <span className="font-semibold text-navy">
-                  {e.engine === 'postgres'
-                    ? 'PostgreSQL'
-                    : e.flavor === 'mariadb'
-                      ? 'MariaDB'
-                      : 'MySQL'}{' '}
-                  {e.version}
-                </span>
-                {e.managed ? (
-                  <Badge tone="success">Siap dikelola</Badge>
-                ) : e.running ? (
-                  <Badge tone="warning">Tidak bisa dikelola</Badge>
-                ) : (
-                  <Badge tone="error">Tidak berjalan</Badge>
-                )}
+          {engines.data.engines
+            .filter((e) => e.engine === engine && e.version)
+            .map((e) => (
+              <div key={e.engine} className="rounded-lg border border-slate-200 p-4">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-navy">
+                    {e.engine === 'postgres'
+                      ? 'PostgreSQL'
+                      : e.flavor === 'mariadb'
+                        ? 'MariaDB'
+                        : 'MySQL'}{' '}
+                    {e.version}
+                  </span>
+                  {e.managed ? (
+                    <Badge tone="success">Siap dikelola</Badge>
+                  ) : e.running ? (
+                    <Badge tone="warning">Tidak bisa dikelola</Badge>
+                  ) : (
+                    <Badge tone="error">Tidak berjalan</Badge>
+                  )}
+                </div>
+                {e.problem && <p className="mt-2 text-sm text-slate-600">{e.problem}</p>}
               </div>
-              {e.problem && <p className="mt-2 text-sm text-slate-600">{e.problem}</p>}
-            </div>
-          ))}
+            ))}
           {!mysql?.version && (
             <div className="rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-700">
-              Belum ada MySQL/MariaDB di VM ini.{' '}
+              Belum ada {engine === 'postgres' ? 'PostgreSQL' : 'MySQL/MariaDB'} di VM ini.{' '}
               <Link className="text-info underline" to={`/vms/${vmId}/software`}>
                 Pasang dari menu Aplikasi
               </Link>
@@ -401,7 +443,7 @@ export function DatabasesPage() {
                       </Button>
                       <a
                         className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:border-navy"
-                        href={`${base}/export?database=${encodeURIComponent(d.name)}`}
+                        href={`${base}/export?database=${encodeURIComponent(d.name)}&engine=${engine}`}
                       >
                         Export
                       </a>
@@ -441,6 +483,13 @@ export function DatabasesPage() {
             </p>
           )}
 
+          {engine === 'postgres' && (
+            <p className="mt-3 rounded-md bg-slate-50 p-3 text-sm text-slate-600">
+              PostgreSQL: akses "Penuh" berarti user menjadi <strong>pemilik</strong> database.
+              "Baca saja" mencakup tabel yang ada saat ini; tabel baru perlu "Beri akses" ulang.
+              Objek yang dibuat user sendiri tetap miliknya meski aksesnya dicabut.
+            </p>
+          )}
           <div className="mt-8 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-navy">User database</h2>
             <Button variant="ghost" onClick={() => setNewUser('')}>
@@ -633,6 +682,7 @@ export function DatabasesPage() {
       {query !== false && (
         <QueryEditor
           vmId={vmId}
+          engine={engine}
           databases={dbNames}
           initial={query}
           onClose={() => setQuery(false)}

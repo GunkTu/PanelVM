@@ -6,13 +6,13 @@ import { z } from 'zod';
 import { actor, requireActive } from '../../auth/plugin.js';
 import type { Ctx } from '../../context.js';
 import { AppError } from '../../errors.js';
-import { execRemote } from '../../ssh/exec.js';
 import { assertVmAccess, type VmRow } from '../../rbac/index.js';
 import type { Lease } from '../../ssh/pool.js';
 import { notifyAdmins } from '../notifications/service.js';
 import { privOpts, sshTargetFor, withVm } from '../vms/service.js';
 import { MysqlDriver } from './mysql.js';
-import type { DbDriver } from './types.js';
+import { PostgresDriver } from './postgres.js';
+import type { DbDriver, Engine } from './types.js';
 import { dbIdentifier, generateDbPassword } from './validate.js';
 
 const vmParams = z.object({ vmId: z.string().uuid() });
@@ -26,9 +26,18 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
     const user = actor(req);
     return { vm: assertVmAccess(ctx.db, user, vmId, 'database'), userId: user.id };
   };
-  const driver = (vm: VmRow, lease: Lease): DbDriver => new MysqlDriver(lease.client, privOpts(vm));
-  const withDriver = <T>(vm: VmRow, fn: (d: DbDriver) => Promise<T>) =>
-    withVm(ctx, vm, (lease) => fn(driver(vm, lease)));
+  /** Engine dipilih lewat query ?engine=mysql|postgres (bawaan mysql); divalidasi zod. */
+  const engineOf = (req: FastifyRequest): Engine =>
+    z
+      .object({ engine: z.enum(['mysql', 'postgres']).default('mysql') })
+      .passthrough()
+      .parse(req.query ?? {}).engine;
+  const driver = (vm: VmRow, lease: Lease, engine: Engine): DbDriver =>
+    engine === 'postgres'
+      ? new PostgresDriver(lease.client, privOpts(vm))
+      : new MysqlDriver(lease.client, privOpts(vm));
+  const withDriver = <T>(vm: VmRow, engine: Engine, fn: (d: DbDriver) => Promise<T>) =>
+    withVm(ctx, vm, (lease) => fn(driver(vm, lease, engine)));
   const rec = (
     req: FastifyRequest,
     vm: VmRow,
@@ -61,49 +70,29 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
     )?.email ?? 'Pengguna';
 
   /** Kredensial dikembalikan SEKALI; password tidak disimpan di panel maupun audit. */
-  const credentialsFor = (user: string, password: string, database?: string) => ({
+  const credentialsFor = (engine: Engine, user: string, password: string, database?: string) => ({
     user,
     password,
     database: database ?? null,
     envSnippet: [
-      'DB_CONNECTION=mysql',
+      `DB_CONNECTION=${engine === 'postgres' ? 'pgsql' : 'mysql'}`,
       'DB_HOST=127.0.0.1',
-      'DB_PORT=3306',
+      `DB_PORT=${engine === 'postgres' ? 5432 : 3306}`,
       ...(database ? [`DB_DATABASE=${database}`] : []),
       `DB_USERNAME=${user}`,
       `DB_PASSWORD=${password}`,
     ].join('\n'),
   });
 
+  /** Selalu mengembalikan kedua engine (terpasang atau tidak) agar UI bisa menawarkan pilihan. */
   app.get('/api/vms/:vmId/databases/engines', { onRequest: requireActive }, async (req) => {
     const { vm } = access(req);
-    const mysql = await withDriver(vm, (d) => d.info());
-    // Deteksi PostgreSQL hanya informatif; manajemennya menyusul (Fase 3).
-    const pg = await withVm(ctx, vm, async (lease) => {
-      const r = await execRemote(
-        lease.client,
-        ['sh', '-c', 'command -v psql >/dev/null 2>&1 && psql --version'],
-        privOpts(vm),
-      );
-      return r.code === 0 ? r.stdout.trim() : null;
-    });
-    return {
+    return withVm(ctx, vm, async (lease) => ({
       engines: [
-        mysql,
-        ...(pg
-          ? [
-              {
-                engine: 'postgres',
-                flavor: 'postgres',
-                version: pg.replace(/^psql \(PostgreSQL\) /, ''),
-                running: true,
-                managed: false,
-                problem: 'Pengelolaan PostgreSQL dari panel belum tersedia.',
-              },
-            ]
-          : []),
+        await driver(vm, lease, 'mysql').info(),
+        await driver(vm, lease, 'postgres').info(),
       ],
-    };
+    }));
   });
 
   app.get(
@@ -111,7 +100,7 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
     { config: rateLimit(30), onRequest: requireActive },
     async (req) => {
       const { vm } = access(req);
-      return withDriver(vm, async (d) => ({
+      return withDriver(vm, engineOf(req), async (d) => ({
         databases: await d.listDatabases(),
         users: await d.listUsers(),
       }));
@@ -121,7 +110,7 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/vms/:vmId/databases', { onRequest: requireActive }, async (req) => {
     const { vm, userId } = access(req);
     const b = z.object({ name: dbIdentifier, user: dbIdentifier.optional() }).parse(req.body);
-    const result = await withDriver(vm, async (d) => {
+    const result = await withDriver(vm, engineOf(req), async (d) => {
       await d.createDatabase(b.name);
       if (!b.user) return null;
       const password = generateDbPassword();
@@ -133,7 +122,7 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
         await d.dropUser(b.user).catch(() => {});
         throw e;
       }
-      return credentialsFor(b.user, password, b.name);
+      return credentialsFor(engineOf(req), b.user, password, b.name);
     });
     rec(req, vm, userId, 'create_database', b.name, 'ok', { withUser: !!b.user });
     return { ok: true, credentials: result };
@@ -148,7 +137,7 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
         'confirm_mismatch',
         'Konfirmasi tidak cocok. Ketik nama database persis untuk menghapus.',
       );
-    await withDriver(vm, (d) => d.dropDatabase(b.name));
+    await withDriver(vm, engineOf(req), (d) => d.dropDatabase(b.name));
     rec(req, vm, userId, 'drop_database', b.name);
     risky(vm, emailOf(userId), `menghapus database "${b.name}"`);
     return { ok: true };
@@ -158,7 +147,7 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
     const { vm, userId } = access(req);
     const b = z.object({ name: dbIdentifier, database: dbIdentifier.optional() }).parse(req.body);
     const password = generateDbPassword();
-    await withDriver(vm, async (d) => {
+    await withDriver(vm, engineOf(req), async (d) => {
       await d.createUser(b.name, password);
       if (b.database)
         await d.grant(b.name, b.database, 'all').catch(async (e) => {
@@ -167,7 +156,7 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
         });
     });
     rec(req, vm, userId, 'create_user', b.name, 'ok', { database: b.database });
-    return { ok: true, credentials: credentialsFor(b.name, password, b.database) };
+    return { ok: true, credentials: credentialsFor(engineOf(req), b.name, password, b.database) };
   });
 
   app.post(
@@ -177,7 +166,7 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
       const { vm, userId } = access(req);
       const b = z.object({ name: dbIdentifier }).parse(req.body);
       const password = generateDbPassword();
-      await withDriver(vm, async (d) => {
+      await withDriver(vm, engineOf(req), async (d) => {
         if (!(await d.listUsers()).some((u) => u.name === b.name))
           throw new AppError(
             404,
@@ -187,7 +176,7 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
         await d.setPassword(b.name, password);
       });
       rec(req, vm, userId, 'reset_user_password', b.name);
-      return { ok: true, credentials: credentialsFor(b.name, password) };
+      return { ok: true, credentials: credentialsFor(engineOf(req), b.name, password) };
     },
   );
 
@@ -200,7 +189,7 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
         'confirm_mismatch',
         'Konfirmasi tidak cocok. Ketik nama user persis untuk menghapus.',
       );
-    await withDriver(vm, (d) => d.dropUser(b.name));
+    await withDriver(vm, engineOf(req), (d) => d.dropUser(b.name));
     rec(req, vm, userId, 'drop_user', b.name);
     risky(vm, emailOf(userId), `menghapus user database "${b.name}"`);
     return { ok: true };
@@ -211,7 +200,7 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
     const b = z
       .object({ user: dbIdentifier, database: dbIdentifier, level: z.enum(['all', 'readonly']) })
       .parse(req.body);
-    await withDriver(vm, async (d) => {
+    await withDriver(vm, engineOf(req), async (d) => {
       const dbs = await d.listDatabases();
       if (!dbs.some((x) => x.name === b.database))
         throw new AppError(404, 'db_unknown', 'Database tidak ditemukan. Muat ulang daftar.');
@@ -230,7 +219,7 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
   app.post('/api/vms/:vmId/databases/revoke', { onRequest: requireActive }, async (req) => {
     const { vm, userId } = access(req);
     const b = z.object({ user: dbIdentifier, database: dbIdentifier }).parse(req.body);
-    await withDriver(vm, (d) => d.revoke(b.user, b.database));
+    await withDriver(vm, engineOf(req), (d) => d.revoke(b.user, b.database));
     rec(req, vm, userId, 'revoke', `${b.user}@${b.database}`);
     return { ok: true };
   });
@@ -251,7 +240,7 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
         .parse(req.body);
       let result;
       try {
-        result = await withDriver(vm, (d) => d.query(b.database, b.sql));
+        result = await withDriver(vm, engineOf(req), (d) => d.query(b.database, b.sql));
       } catch (e) {
         rec(req, vm, userId, 'query', b.database ?? '-', 'fail', { chars: b.sql.length });
         throw e;
@@ -303,7 +292,7 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
       });
       (req.body as Readable).pipe(limiter);
       try {
-        await withDriver(vm, async (d) => {
+        await withDriver(vm, engineOf(req), async (d) => {
           if (!(await d.listDatabases()).some((x) => x.name === database))
             throw new AppError(
               404,
@@ -330,7 +319,7 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
       const { vmId } = vmParams.parse(req.params);
       const lease = await ctx.pool.acquire(vmId, sshTargetFor(ctx, vm));
       try {
-        const d = driver(vm, lease);
+        const d = driver(vm, lease, engineOf(req));
         if (!(await d.listDatabases()).some((x) => x.name === database))
           throw new AppError(404, 'db_unknown', 'Database tidak ditemukan. Muat ulang daftar.');
         const { stream, done } = await d.exportSql(database);
