@@ -1,6 +1,8 @@
 import type { AddressInfo } from 'node:net';
-import { Server } from 'ssh2';
+import ssh2 from 'ssh2';
 import { generateKeyPair } from '../src/ssh/connect.js';
+
+const { Server } = ssh2;
 
 /** Server SSH palsu: menerima semua kunci, shell mengirim "hello" lalu meng-echo input. */
 export async function startFakeSsh(): Promise<{ port: number; close: () => Promise<void> }> {

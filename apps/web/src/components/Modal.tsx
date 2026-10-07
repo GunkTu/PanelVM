@@ -6,9 +6,10 @@ export interface ModalProps {
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
+  wide?: boolean;
 }
 
-export function Modal({ open, title, onClose, children, footer }: ModalProps) {
+export function Modal({ open, title, onClose, children, footer, wide }: ModalProps) {
   const titleId = useId();
 
   useEffect(() => {
@@ -27,7 +28,7 @@ export function Modal({ open, title, onClose, children, footer }: ModalProps) {
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="w-full max-w-md rounded-lg bg-white shadow-xl"
+        className={`max-h-[90vh] w-full overflow-y-auto rounded-lg bg-white shadow-xl ${wide ? 'max-w-2xl' : 'max-w-md'}`}
       >
         <h2
           id={titleId}

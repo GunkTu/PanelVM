@@ -1,20 +1,69 @@
-import { Badge } from './components';
+import { lazy, Suspense } from 'react';
+import { Navigate, Route, Routes } from 'react-router-dom';
+import { AdminAuditPage } from './features/admin/AdminAuditPage';
+import { AdminUsersPage } from './features/admin/AdminUsersPage';
+import { AdminVmsPage } from './features/admin/AdminVmsPage';
+import { RequireAuth } from './features/auth/AuthContext';
+import { LoginPage } from './features/auth/LoginPage';
+import { SetupTwoFactorPage } from './features/auth/SetupTwoFactorPage';
+import { TwoFactorPage } from './features/auth/TwoFactorPage';
+import { AppLayout } from './features/layout/AppLayout';
+import { VmListPage } from './features/vms/VmListPage';
 
-/** Placeholder Fase 0. Layout sidebar/header dibangun di Fase 1 bersama auth. */
+// xterm cukup besar; muat hanya saat halaman terminal dibuka.
+const TerminalPage = lazy(() =>
+  import('./features/terminal/TerminalPage').then((m) => ({ default: m.TerminalPage })),
+);
+
 export function App() {
   return (
-    <div className="flex min-h-screen">
-      <aside className="w-60 bg-navy p-4 text-white">
-        <p className="text-sm text-slate-300">VM aktif</p>
-        <p className="font-semibold">Belum dipilih</p>
-      </aside>
-      <main className="flex-1 p-6">
-        <h1 className="text-2xl font-semibold text-navy">Panel VM</h1>
-        <p className="mt-2 text-slate-600">Fondasi aplikasi siap. Fitur dibangun mulai Fase 1.</p>
-        <div className="mt-4">
-          <Badge tone="info">Fase 0</Badge>
-        </div>
-      </main>
-    </div>
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/login/2fa" element={<TwoFactorPage />} />
+      <Route path="/login/2fa-setup" element={<SetupTwoFactorPage />} />
+      <Route
+        element={
+          <RequireAuth>
+            <AppLayout />
+          </RequireAuth>
+        }
+      >
+        <Route index element={<Navigate to="/vms" replace />} />
+        <Route path="/vms" element={<VmListPage />} />
+        <Route
+          path="/vms/:vmId/terminal"
+          element={
+            <Suspense fallback={<p className="text-sm text-slate-500">Memuat terminal...</p>}>
+              <TerminalPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/admin/vms"
+          element={
+            <RequireAuth admin>
+              <AdminVmsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/admin/users"
+          element={
+            <RequireAuth admin>
+              <AdminUsersPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/admin/audit"
+          element={
+            <RequireAuth admin>
+              <AdminAuditPage />
+            </RequireAuth>
+          }
+        />
+        <Route path="*" element={<Navigate to="/vms" replace />} />
+      </Route>
+    </Routes>
   );
 }

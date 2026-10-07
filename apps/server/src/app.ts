@@ -101,38 +101,30 @@ export async function buildApp(env: Env, opts: BuildOptions = {}): Promise<Built
     if (err instanceof ZodError) {
       const first = err.issues[0];
       const where = first?.path.length ? ` (${first.path.join('.')})` : '';
-      return reply
-        .code(400)
-        .send({
-          error: 'invalid_input',
-          message: `Input tidak valid${where}: ${first?.message ?? 'periksa isian Anda'}. Perbaiki lalu kirim ulang.`,
-        });
+      return reply.code(400).send({
+        error: 'invalid_input',
+        message: `Input tidak valid${where}: ${first?.message ?? 'periksa isian Anda'}. Perbaiki lalu kirim ulang.`,
+      });
     }
     const status = (err as { statusCode?: number }).statusCode;
     if (status === 429)
-      return reply
-        .code(429)
-        .send({
-          error: 'rate_limited',
-          message: 'Terlalu banyak permintaan. Tunggu sebentar lalu coba lagi.',
-        });
+      return reply.code(429).send({
+        error: 'rate_limited',
+        message: 'Terlalu banyak permintaan. Tunggu sebentar lalu coba lagi.',
+      });
     if (status && status >= 400 && status < 500) {
-      return reply
-        .code(status)
-        .send({
-          error: 'bad_request',
-          message: 'Permintaan tidak dapat diproses. Muat ulang halaman lalu coba lagi.',
-        });
+      return reply.code(status).send({
+        error: 'bad_request',
+        message: 'Permintaan tidak dapat diproses. Muat ulang halaman lalu coba lagi.',
+      });
     }
     // Detail teknis hanya ke log server, tidak ke pengguna.
     req.log.error({ err }, 'unhandled error');
-    return reply
-      .code(500)
-      .send({
-        error: 'internal',
-        message:
-          'Server gagal memproses permintaan Anda. Coba lagi beberapa saat; bila terus terjadi, hubungi admin.',
-      });
+    return reply.code(500).send({
+      error: 'internal',
+      message:
+        'Server gagal memproses permintaan Anda. Coba lagi beberapa saat; bila terus terjadi, hubungi admin.',
+    });
   });
 
   app.get('/api/health', async () => ({ status: 'ok' }));
@@ -148,12 +140,10 @@ export async function buildApp(env: Env, opts: BuildOptions = {}): Promise<Built
     await app.register(fastifyStatic, { root: webDist, wildcard: false });
     app.setNotFoundHandler((req, reply) => {
       if (req.method === 'GET' && !req.url.startsWith('/api/')) return reply.sendFile('index.html');
-      return reply
-        .code(404)
-        .send({
-          error: 'not_found',
-          message: 'Alamat tidak ditemukan. Periksa URL atau kembali ke beranda.',
-        });
+      return reply.code(404).send({
+        error: 'not_found',
+        message: 'Alamat tidak ditemukan. Periksa URL atau kembali ke beranda.',
+      });
     });
   }
 
