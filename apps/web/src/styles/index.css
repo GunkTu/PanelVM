@@ -1,32 +1,142 @@
+@import '@fontsource-variable/inter';
 @import 'tailwindcss';
 
-/* Design tokens (CLAUDE.md bagian 8). Teks kuning TIDAK dipakai di atas latar putih. */
+/*
+ * Design tokens (CLAUDE.md bagian 8): navy primer, kuning aksen. Teks kuning TIDAK dipakai di atas latar putih;
+ * kuning hanya sebagai latar tombol/indikator dengan teks biru tua (kontras 8,9:1).
+ */
 @theme {
   --color-navy: #0b1f4b;
   --color-navy-dark: #071536;
+  --color-navy-light: #163376;
   --color-white: #ffffff;
   --color-yellow: #f5b700;
   --color-yellow-dark: #d9a000;
+  --color-canvas: #f4f6fa;
   --color-success: #15803d;
   --color-error: #b91c1c;
   --color-warning: #a16207;
   --color-info: #1d4ed8;
-  --font-sans: ui-sans-serif, system-ui, 'Segoe UI', Roboto, sans-serif;
+
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, 'Segoe UI', Roboto, sans-serif;
   --font-mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+
+  --radius-card: 0.875rem;
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px rgb(15 23 42 / 0.06);
+  --shadow-lift: 0 4px 12px -2px rgb(11 31 75 / 0.12), 0 2px 4px rgb(15 23 42 / 0.05);
+  --shadow-pop: 0 24px 48px -12px rgb(7 21 54 / 0.35);
+
+  --animate-fade-in: fade-in 0.2s ease-out both;
+  --animate-pop-in: pop-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-slide-in: slide-in 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-shimmer: shimmer 1.4s ease-in-out infinite;
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes slide-in {
+    from {
+      opacity: 0;
+      transform: translateX(16px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes shimmer {
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
+    }
+  }
+}
+
+/* Kartu standar: dipakai komponen Card dan markup halaman. */
+@utility card {
+  @apply rounded-(--radius-card) border border-slate-200/80 bg-white shadow-(--shadow-card);
+}
+
+html {
+  font-feature-settings: 'cv11', 'ss01';
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
-  @apply bg-white font-sans text-slate-800 antialiased;
+  @apply bg-canvas font-sans text-slate-800 antialiased;
+}
+
+h1,
+h2,
+h3 {
+  letter-spacing: -0.015em;
+}
+
+::selection {
+  background: rgb(245 183 0 / 0.35);
 }
 
 :focus-visible {
   outline: 2px solid var(--color-yellow);
   outline-offset: 2px;
+  border-radius: 0.375rem;
+}
+
+/* Isian formulir: fokus jelas tanpa menimpa outline keyboard. */
+input:not([type='checkbox']):not([type='radio']):not([type='file']),
+select,
+textarea {
+  @apply rounded-lg border border-slate-300 bg-white text-sm text-slate-900 shadow-xs transition-colors;
+}
+input:not([type='checkbox']):not([type='radio']):not([type='file']):hover,
+select:hover,
+textarea:hover {
+  @apply border-slate-400;
+}
+input:not([type='checkbox']):not([type='radio']):not([type='file']):focus,
+select:focus,
+textarea:focus {
+  @apply border-navy ring-4 ring-navy/10 outline-none;
+}
+input[type='checkbox'],
+input[type='radio'] {
+  accent-color: var(--color-navy);
+  width: 1rem;
+  height: 1rem;
+}
+input[type='file'] {
+  @apply text-sm text-slate-600 file:mr-3 file:cursor-pointer file:rounded-lg file:border-0 file:bg-navy file:px-3 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-navy-light;
+}
+
+/* Scrollbar tipis dan halus. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(148 163 184 / 0.6) transparent;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  * {
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
 }

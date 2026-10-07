@@ -1,7 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Badge, Button, Input, JobLog, Modal, Skeleton, useToast } from '../../components';
+import { Globe, Plus } from 'lucide-react';
+import {
+  Badge,
+  Button,
+  ButtonLink,
+  EmptyState,
+  Input,
+  JobLog,
+  Modal,
+  PageHeader,
+  Skeleton,
+  useToast,
+} from '../../components';
 import { api } from '../../lib/api';
 import type { Job } from '../../lib/types';
 import { uploadRaw } from '../../lib/upload';
@@ -181,19 +193,20 @@ export function SitesPage() {
 
   return (
     <div>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-semibold text-navy">Situs Web</h1>
-        <Button
-          onClick={() => setCreating(true)}
-          disabled={options.data ? !options.data.nginx : false}
-        >
-          Tambah situs
-        </Button>
-      </div>
-      <p className="mt-1 text-sm text-slate-600">
-        Nginx di VM melayani tiap domain di port 80. Arahkan domain ke VM lewat Nginx Proxy Manager
-        (host: IP VM, port 80).
-      </p>
+      <PageHeader
+        icon={<Globe className="h-5 w-5" />}
+        title="Situs Web"
+        description="Nginx di VM melayani tiap domain di port 80. Arahkan domain ke VM lewat Nginx Proxy Manager (host: IP VM, port 80)."
+        actions={
+          <Button
+            icon={<Plus className="h-4 w-4" />}
+            onClick={() => setCreating(true)}
+            disabled={options.data ? !options.data.nginx : false}
+          >
+            Tambah situs
+          </Button>
+        }
+      />
 
       {options.data &&
         (!options.data.nginx ||
@@ -201,7 +214,7 @@ export function SitesPage() {
           !options.data.composer) && (
           <div
             role="status"
-            className="mt-4 rounded-md border border-warning bg-yellow-50 p-3 text-sm text-yellow-900"
+            className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
           >
             Prasyarat belum lengkap:
             <ul className="ml-5 list-disc">
@@ -220,7 +233,7 @@ export function SitesPage() {
         )}
 
       {jobId && (
-        <div className="mt-4 rounded-lg border border-slate-200 p-4">
+        <div className="mt-4 card p-5">
           <JobLog
             vmId={vmId}
             jobId={jobId}
@@ -244,13 +257,13 @@ export function SitesPage() {
         {sites.error && (
           <p
             role="alert"
-            className="rounded-md border border-error bg-red-50 p-3 text-red-900 lg:col-span-2"
+            className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-900 lg:col-span-2"
           >
             {sites.error.message}
           </p>
         )}
         {sites.data?.items.map((s) => (
-          <div key={s.id} className="rounded-lg border border-slate-200 p-4">
+          <div key={s.id} className="card p-5">
             <div className="flex items-center justify-between gap-2">
               <span className="font-semibold text-navy">{s.domain}</span>
               <span className="flex gap-1">
@@ -260,30 +273,29 @@ export function SitesPage() {
             </div>
             <p className="mt-1 break-all font-mono text-xs text-slate-500">{s.rootPath}</p>
             <div className="mt-3 flex flex-wrap gap-2">
-              <Button
-                className="!px-3 !py-1.5"
-                onClick={() => setDialog({ kind: 'deploy', site: s })}
-              >
+              <Button size="sm" onClick={() => setDialog({ kind: 'deploy', site: s })}>
                 Deploy kode
               </Button>
-              <Link
-                className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-semibold text-navy hover:bg-slate-100"
+              <ButtonLink
+                variant="secondary"
+                size="sm"
                 to={`/vms/${vmId}/files?path=${encodeURIComponent(s.rootPath)}`}
               >
                 File
-              </Link>
+              </ButtonLink>
               {s.envPath && (
-                <Link
-                  className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-semibold text-navy hover:bg-slate-100"
+                <ButtonLink
+                  variant="secondary"
+                  size="sm"
                   to={`/vms/${vmId}/files?path=${encodeURIComponent(s.rootPath)}&edit=${encodeURIComponent(s.envPath)}`}
                 >
                   Edit .env
-                </Link>
+                </ButtonLink>
               )}
               {s.kind === 'laravel' && (
                 <Button
                   variant="ghost"
-                  className="!px-3 !py-1.5"
+                  size="sm"
                   onClick={() => {
                     setArtisanOut(null);
                     setDialog({ kind: 'artisan', site: s });
@@ -295,7 +307,7 @@ export function SitesPage() {
               {s.kind !== 'static' && (
                 <Button
                   variant="ghost"
-                  className="!px-3 !py-1.5"
+                  size="sm"
                   onClick={() => {
                     setNewPhp(s.phpVersion ?? '');
                     setDialog({ kind: 'php', site: s });
@@ -306,7 +318,8 @@ export function SitesPage() {
               )}
               <Button
                 variant="ghost"
-                className="!px-3 !py-1.5 !text-error"
+                size="sm"
+                className="!text-error"
                 onClick={() => {
                   setDelFiles(false);
                   setDialog({ kind: 'delete', site: s });
@@ -318,10 +331,12 @@ export function SitesPage() {
           </div>
         ))}
         {sites.data && sites.data.items.length === 0 && (
-          <p className="rounded-md border border-dashed border-slate-300 p-6 text-sm text-slate-600 lg:col-span-2">
-            Belum ada situs. Klik "Tambah situs", isi domain, lalu deploy kode Laravel atau PHP
-            Anda.
-          </p>
+          <EmptyState
+            className="lg:col-span-2"
+            icon={<Globe className="h-6 w-6" />}
+            title="Belum ada situs"
+            description='Klik "Tambah situs", isi domain, lalu deploy kode Laravel atau PHP Anda.'
+          />
         )}
       </div>
 
@@ -358,7 +373,7 @@ export function SitesPage() {
             </label>
             <select
               id="kind"
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+              className="mt-1 w-full h-10 px-3"
               value={form.kind}
               onChange={(e) => setForm((f) => ({ ...f, kind: e.target.value }))}
             >
@@ -374,7 +389,7 @@ export function SitesPage() {
               </label>
               <select
                 id="phpv"
-                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+                className="mt-1 w-full h-10 px-3"
                 value={phpChoice}
                 onChange={(e) => setForm((f) => ({ ...f, phpVersion: e.target.value }))}
               >
@@ -479,7 +494,7 @@ export function SitesPage() {
           </div>
         )}
         {laravel && (
-          <fieldset className="mt-4 rounded-md bg-slate-50 p-3">
+          <fieldset className="mt-4 rounded-xl bg-slate-50 p-4">
             <legend className="px-1 text-xs font-medium text-slate-600">
               Setelah kode terpasang
             </legend>
@@ -538,7 +553,7 @@ export function SitesPage() {
         </label>
         <select
           id="art"
-          className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 font-mono"
+          className="mt-1 w-full h-10 px-3 font-mono"
           value={artisan}
           onChange={(e) => setArtisan(e.target.value as (typeof ARTISAN)[number])}
         >
@@ -554,7 +569,7 @@ export function SitesPage() {
           </p>
         )}
         {artisanOut && (
-          <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded-md bg-[#0a0f1e] p-3 font-mono text-xs text-slate-200">{`[kode keluar ${artisanOut.code}]\n${artisanOut.output}`}</pre>
+          <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded-xl bg-[#0a0f1e] p-4 font-mono text-xs text-slate-200">{`[kode keluar ${artisanOut.code}]\n${artisanOut.output}`}</pre>
         )}
       </Modal>
 
@@ -577,7 +592,7 @@ export function SitesPage() {
       >
         <select
           aria-label="Versi PHP"
-          className="w-full rounded-md border border-slate-300 px-3 py-2"
+          className="w-full h-10 px-3"
           value={newPhp}
           onChange={(e) => setNewPhp(e.target.value)}
         >

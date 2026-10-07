@@ -42,15 +42,29 @@ export function JobLog({
   return (
     <div>
       <div className="mb-2 flex items-center gap-2">
-        <span className="font-medium text-navy">{data?.title ?? 'Memuat...'}</span>
-        {data && <Badge tone={tone[data.status]}>{label[data.status]}</Badge>}
+        <span className="font-semibold text-navy">{data?.title ?? 'Memuat...'}</span>
+        {data && (
+          <Badge tone={tone[data.status]} dot>
+            {label[data.status]}
+          </Badge>
+        )}
       </div>
-      <pre
-        ref={box}
-        className="max-h-96 overflow-auto whitespace-pre-wrap rounded-md bg-[#0a0f1e] p-3 font-mono text-xs text-slate-200"
-      >
-        {data?.log || 'Menunggu keluaran...'}
-      </pre>
+      <div className="overflow-hidden rounded-xl border border-slate-800 bg-[#0a0f1e]">
+        <div
+          className="flex items-center gap-1.5 border-b border-white/10 px-3 py-2"
+          aria-hidden="true"
+        >
+          <span className="h-2.5 w-2.5 rounded-full bg-red-400/80" />
+          <span className="h-2.5 w-2.5 rounded-full bg-amber-400/80" />
+          <span className="h-2.5 w-2.5 rounded-full bg-green-400/80" />
+        </div>
+        <pre
+          ref={box}
+          className="max-h-96 overflow-auto p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap text-slate-200"
+        >
+          {data?.log || 'Menunggu keluaran...'}
+        </pre>
+      </div>
     </div>
   );
 }

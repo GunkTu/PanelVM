@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { RefreshCw, Settings2 } from 'lucide-react';
 import {
   Badge,
   Button,
   ConfirmDialog,
   Input,
   Modal,
+  PageHeader,
   Table,
   useToast,
   type BadgeTone,
@@ -91,13 +93,22 @@ export function ServicesPage() {
 
   return (
     <div>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-semibold text-navy">Service</h1>
-        <Button variant="ghost" loading={list.isFetching} onClick={() => void list.refetch()}>
-          Muat ulang
-        </Button>
-      </div>
-      <div className="mt-3 flex flex-wrap items-end gap-3">
+      <PageHeader
+        icon={<Settings2 className="h-5 w-5" />}
+        title="Service"
+        description="Kelola layanan systemd di VM: jalankan, hentikan, mulai ulang, dan lihat log."
+        actions={
+          <Button
+            variant="ghost"
+            icon={<RefreshCw className="h-4 w-4" />}
+            loading={list.isFetching}
+            onClick={() => void list.refetch()}
+          >
+            Muat ulang
+          </Button>
+        }
+      />
+      <div className="flex flex-wrap items-end gap-3">
         <div className="w-64">
           <Input label="Cari service" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
@@ -149,66 +160,43 @@ export function ServicesPage() {
               render: (s) => (
                 <div className="flex flex-wrap gap-1">
                   {s.protected ? (
-                    <Button
-                      variant="ghost"
-                      className="!px-2 !py-1 text-xs"
-                      onClick={() => ask(s.name, 'reload')}
-                    >
+                    <Button variant="ghost" size="sm" onClick={() => ask(s.name, 'reload')}>
                       Reload
                     </Button>
                   ) : (
                     <>
                       {s.active !== 'active' && (
-                        <Button
-                          variant="ghost"
-                          className="!px-2 !py-1 text-xs"
-                          onClick={() => ask(s.name, 'start')}
-                        >
+                        <Button variant="ghost" size="sm" onClick={() => ask(s.name, 'start')}>
                           Start
                         </Button>
                       )}
                       {s.active === 'active' && (
-                        <Button
-                          variant="ghost"
-                          className="!px-2 !py-1 text-xs"
-                          onClick={() => ask(s.name, 'restart')}
-                        >
+                        <Button variant="ghost" size="sm" onClick={() => ask(s.name, 'restart')}>
                           Restart
                         </Button>
                       )}
                       {s.active === 'active' && (
                         <Button
                           variant="ghost"
-                          className="!px-2 !py-1 text-xs !text-error"
+                          size="sm"
+                          className="!text-error"
                           onClick={() => ask(s.name, 'stop')}
                         >
                           Stop
                         </Button>
                       )}
                       {s.enabled === 'enabled' ? (
-                        <Button
-                          variant="ghost"
-                          className="!px-2 !py-1 text-xs"
-                          onClick={() => ask(s.name, 'disable')}
-                        >
+                        <Button variant="ghost" size="sm" onClick={() => ask(s.name, 'disable')}>
                           Nonaktifkan boot
                         </Button>
                       ) : s.enabled === 'disabled' ? (
-                        <Button
-                          variant="ghost"
-                          className="!px-2 !py-1 text-xs"
-                          onClick={() => ask(s.name, 'enable')}
-                        >
+                        <Button variant="ghost" size="sm" onClick={() => ask(s.name, 'enable')}>
                           Aktifkan boot
                         </Button>
                       ) : null}
                     </>
                   )}
-                  <Button
-                    variant="ghost"
-                    className="!px-2 !py-1 text-xs"
-                    onClick={() => setLogFor(s.name)}
-                  >
+                  <Button variant="ghost" size="sm" onClick={() => setLogFor(s.name)}>
                     Log
                   </Button>
                 </div>
@@ -248,7 +236,7 @@ export function ServicesPage() {
         </label>
         <select
           id="lines"
-          className="ml-2 rounded-md border border-slate-300 px-2 py-1"
+          className="ml-2 h-8 px-2"
           value={lines}
           onChange={(e) => setLines(Number(e.target.value))}
         >
@@ -263,7 +251,7 @@ export function ServicesPage() {
           </p>
         )}
         {logs.data && (
-          <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap rounded-md bg-[#0a0f1e] p-3 font-mono text-xs text-slate-200">
+          <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap rounded-xl bg-[#0a0f1e] p-4 font-mono text-xs text-slate-200">
             {logs.data.log || 'Log kosong.'}
           </pre>
         )}

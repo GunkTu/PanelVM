@@ -1,3 +1,4 @@
+import { AlertTriangle, CheckCircle2, Info, X, XCircle } from 'lucide-react';
 import {
   createContext,
   useCallback,
@@ -22,11 +23,23 @@ interface ToastApi {
 
 const ToastContext = createContext<ToastApi | null>(null);
 
-const styles: Record<ToastKind, string> = {
-  success: 'bg-green-50 border-success text-green-900',
-  error: 'bg-red-50 border-error text-red-900',
-  warning: 'bg-yellow-50 border-warning text-yellow-900',
-  info: 'bg-blue-50 border-info text-blue-900',
+const styles: Record<ToastKind, { box: string; icon: ReactNode }> = {
+  success: {
+    box: 'border-green-200 bg-green-50 text-green-900',
+    icon: <CheckCircle2 className="h-5 w-5 text-green-600" />,
+  },
+  error: {
+    box: 'border-red-200 bg-red-50 text-red-900',
+    icon: <XCircle className="h-5 w-5 text-red-600" />,
+  },
+  warning: {
+    box: 'border-amber-200 bg-amber-50 text-amber-900',
+    icon: <AlertTriangle className="h-5 w-5 text-amber-600" />,
+  },
+  info: {
+    box: 'border-blue-200 bg-blue-50 text-blue-900',
+    icon: <Info className="h-5 w-5 text-blue-600" />,
+  },
 };
 
 /** Sukses/info hilang otomatis. Error dan peringatan tetap sampai ditutup. */
@@ -52,16 +65,24 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={api}>
       {children}
-      <div className="fixed bottom-4 right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2">
+      <div className="fixed right-4 bottom-4 z-50 flex w-96 max-w-[calc(100vw-2rem)] flex-col gap-2">
         {items.map((t) => (
           <div
             key={t.id}
             role={t.kind === 'error' ? 'alert' : 'status'}
-            className={`flex items-start justify-between gap-3 rounded-md border-l-4 px-4 py-3 text-sm shadow ${styles[t.kind]}`}
+            className={`flex items-start gap-3 rounded-xl border px-4 py-3 text-sm shadow-(--shadow-lift) animate-slide-in ${styles[t.kind].box}`}
           >
-            <span>{t.message}</span>
-            <button type="button" aria-label="Tutup notifikasi" onClick={() => dismiss(t.id)}>
-              ×
+            <span aria-hidden="true" className="mt-0.5 shrink-0">
+              {styles[t.kind].icon}
+            </span>
+            <span className="min-w-0 flex-1">{t.message}</span>
+            <button
+              type="button"
+              aria-label="Tutup notifikasi"
+              onClick={() => dismiss(t.id)}
+              className="shrink-0 rounded-md p-0.5 opacity-60 transition-opacity hover:opacity-100"
+            >
+              <X aria-hidden="true" className="h-4 w-4" />
             </button>
           </div>
         ))}

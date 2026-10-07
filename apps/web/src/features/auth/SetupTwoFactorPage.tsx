@@ -47,7 +47,7 @@ export function SetupTwoFactorPage() {
         title="Simpan recovery code"
         subtitle="Tiap kode hanya bisa dipakai sekali bila Anda kehilangan akses ke aplikasi autentikator. Kode ini tidak akan ditampilkan lagi."
       >
-        <ul className="grid grid-cols-2 gap-2 rounded-md bg-slate-50 p-3 font-mono text-sm">
+        <ul className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-slate-50 p-4 font-mono text-sm tracking-wide text-navy">
           {recovery.map((c) => (
             <li key={c}>{c}</li>
           ))}

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Badge, Button, JobLog, Modal, Skeleton, useToast } from '../../components';
+import { Package, RefreshCw } from 'lucide-react';
+import { Badge, Button, JobLog, Modal, PageHeader, Skeleton, useToast } from '../../components';
 import { api } from '../../lib/api';
 import { formatTime } from '../../lib/format';
 import type { Job } from '../../lib/types';
@@ -87,16 +88,21 @@ export function SoftwarePage() {
 
   return (
     <div>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-semibold text-navy">Aplikasi</h1>
-        <Button variant="ghost" disabled={busy} onClick={() => aptUpdate.mutate()}>
-          Segarkan daftar paket
-        </Button>
-      </div>
-      <p className="mt-1 text-sm text-slate-600">
-        Pasang database, PHP, composer, dan web server di VM ini dengan satu klik. Versi yang muncul
-        mengikuti repositori OS di VM.
-      </p>
+      <PageHeader
+        icon={<Package className="h-5 w-5" />}
+        title="Aplikasi"
+        description="Pasang database, PHP, composer, dan web server di VM ini dengan satu klik. Versi yang muncul mengikuti repositori OS di VM."
+        actions={
+          <Button
+            variant="ghost"
+            icon={<RefreshCw className="h-4 w-4" />}
+            disabled={busy}
+            onClick={() => aptUpdate.mutate()}
+          >
+            Segarkan daftar paket
+          </Button>
+        }
+      />
 
       {status.isLoading && (
         <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -106,14 +112,17 @@ export function SoftwarePage() {
         </div>
       )}
       {status.error && (
-        <p role="alert" className="mt-4 rounded-md border border-error bg-red-50 p-3 text-red-900">
+        <p
+          role="alert"
+          className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-red-900"
+        >
           {status.error.message}
         </p>
       )}
       {s && !s.os.supported && (
         <p
           role="alert"
-          className="mt-4 rounded-md border border-warning bg-yellow-50 p-3 text-yellow-900"
+          className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900"
         >
           OS VM ({s.os.pretty || 'tidak dikenal'}) belum didukung installer. Yang didukung: Debian
           dan Ubuntu.
@@ -126,7 +135,7 @@ export function SoftwarePage() {
       )}
 
       {jobId && (
-        <div className="mt-4 rounded-lg border border-slate-200 p-4">
+        <div className="mt-4 card p-5">
           <JobLog vmId={vmId} jobId={jobId} onDone={() => void refresh()} />
           <Button variant="ghost" className="mt-2" onClick={() => setJobId(null)}>
             Tutup log
@@ -137,10 +146,7 @@ export function SoftwarePage() {
       {s && (
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           {s.items.map((it) => (
-            <div
-              key={it.id}
-              className="flex flex-col justify-between rounded-lg border border-slate-200 p-4"
-            >
+            <div key={it.id} className="flex flex-col justify-between card p-5">
               <div>
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-semibold text-navy">{it.title}</span>
@@ -175,7 +181,7 @@ export function SoftwarePage() {
             </div>
           ))}
 
-          <div className="rounded-lg border border-slate-200 p-4 md:col-span-2">
+          <div className="card p-5 md:col-span-2">
             <div className="flex items-center justify-between gap-2">
               <span className="font-semibold text-navy">PHP (FPM)</span>
               {s.php.repoInstalled ? (
@@ -198,7 +204,7 @@ export function SoftwarePage() {
                     <Badge tone="success">Terpasang</Badge>
                   ) : (
                     <Button
-                      className="!px-2 !py-1 text-xs"
+                      size="sm"
                       disabled={busy || !s.os.supported}
                       loading={
                         install.isPending &&
@@ -240,7 +246,7 @@ export function SoftwarePage() {
               </div>
             </fieldset>
             {!s.php.repoInstalled && (
-              <div className="mt-4 rounded-md bg-slate-50 p-3 text-sm">
+              <div className="mt-4 rounded-xl bg-slate-50 p-4 text-sm">
                 <p>Butuh versi PHP selain bawaan OS? Aktifkan repositori tambahan (Ondřej Surý).</p>
                 <Button
                   variant="secondary"
@@ -254,7 +260,7 @@ export function SoftwarePage() {
             )}
           </div>
 
-          <div className="rounded-lg border border-slate-200 p-4 md:col-span-2">
+          <div className="card p-5 md:col-span-2">
             <div className="flex items-center justify-between gap-2">
               <span className="font-semibold text-navy">PostgreSQL</span>
               {s.postgres.versions.some((v) => v.installed) ? (
@@ -277,7 +283,7 @@ export function SoftwarePage() {
               <div className="mt-3 flex items-center gap-2">
                 <select
                   aria-label="Versi PostgreSQL"
-                  className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  className="h-10 px-3 text-sm"
                   value={pgChoice}
                   onChange={(e) => setPgVersion(e.target.value)}
                 >
@@ -321,11 +327,7 @@ export function SoftwarePage() {
                       ? 'Selesai'
                       : 'Gagal'}
                 </Badge>
-                <Button
-                  variant="ghost"
-                  className="!px-2 !py-1 text-xs"
-                  onClick={() => setJobId(j.id)}
-                >
+                <Button variant="ghost" size="sm" onClick={() => setJobId(j.id)}>
                   Lihat log
                 </Button>
               </span>

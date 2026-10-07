@@ -117,9 +117,6 @@ export function TerminalView({ vmId, active, onState }: Props) {
   }, [active]);
 
   return (
-    <div
-      ref={host}
-      className={`h-[70vh] w-full rounded-md bg-[#0a0f1e] p-2 ${active ? '' : 'hidden'}`}
-    />
+    <div ref={host} className={`h-[68vh] w-full bg-[#0a0f1e] p-2 ${active ? '' : 'hidden'}`} />
   );
 }

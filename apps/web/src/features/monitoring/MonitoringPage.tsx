@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Badge, Skeleton, Table } from '../../components';
+import { Activity, Clock, Cpu, Gauge as Gauge2, MemoryStick } from 'lucide-react';
+import { Badge, PageHeader, ProgressBar, SectionTitle, Skeleton, Table } from '../../components';
 import { api } from '../../lib/api';
 import { formatBytes } from '../../lib/format';
 import { useVmId } from '../layout/useVmId';
@@ -41,52 +42,99 @@ function uptimeText(s: number): string {
   return [d ? `${d} hari` : '', h ? `${h} jam` : '', `${m} menit`].filter(Boolean).join(' ');
 }
 
-/** Warna bar mengikuti beban: hijau, kuning, merah (disertai angka agar tidak bergantung warna saja). */
-function Bar({ percent, label }: { percent: number; label: string }) {
-  const tone = percent >= 90 ? 'bg-error' : percent >= 75 ? 'bg-yellow' : 'bg-success';
+/** Gauge melingkar: warna mengikuti beban (hijau, kuning >= 75%, merah >= 90%); angka selalu tertulis di tengah. */
+function Gauge({ percent, label }: { percent: number; label: string }) {
+  const p = Math.min(100, Math.max(0, percent));
+  const r = 34;
+  const c = 2 * Math.PI * r;
+  const color = p >= 90 ? '#b91c1c' : p >= 75 ? '#f5b700' : '#15803d';
   return (
     <div
       role="progressbar"
       aria-label={label}
-      aria-valuenow={Math.round(percent)}
+      aria-valuenow={Math.round(p)}
       aria-valuemin={0}
       aria-valuemax={100}
+      className="relative h-24 w-24 shrink-0"
     >
-      <div className="h-2.5 overflow-hidden rounded bg-slate-200">
-        <div
-          className={`h-2.5 rounded ${tone} transition-all`}
-          style={{ width: `${Math.min(100, Math.max(0, percent))}%` }}
+      <svg viewBox="0 0 80 80" className="h-full w-full -rotate-90" aria-hidden="true">
+        <circle cx="40" cy="40" r={r} fill="none" stroke="#e2e8f0" strokeWidth="8" />
+        <circle
+          cx="40"
+          cy="40"
+          r={r}
+          fill="none"
+          stroke={color}
+          strokeWidth="8"
+          strokeLinecap="round"
+          strokeDasharray={c}
+          strokeDashoffset={c - (p / 100) * c}
+          className="transition-all duration-700"
         />
-      </div>
+      </svg>
+      <span className="absolute inset-0 flex items-center justify-center text-lg font-semibold text-navy">
+        {Math.round(p)}%
+      </span>
     </div>
   );
 }
 
 function Sparkline({ values }: { values: number[] }) {
-  if (values.length < 2)
-    return <div className="h-12 text-xs text-slate-400">Mengumpulkan data...</div>;
+  if (values.length < 2) return <p className="mt-3 text-xs text-slate-400">Mengumpulkan data...</p>;
   const w = 200;
-  const h = 48;
-  const pts = values
-    .map((v, i) => `${(i / (HISTORY - 1)) * w},${h - (Math.min(100, v) / 100) * h}`)
-    .join(' ');
+  const h = 40;
+  const pts = values.map(
+    (v, i) => `${(i / (values.length - 1)) * w},${h - (Math.min(100, v) / 100) * (h - 4) - 2}`,
+  );
+  const last = pts[pts.length - 1]!.split(',')[0];
   return (
     <svg
       viewBox={`0 0 ${w} ${h}`}
-      className="h-12 w-full"
+      preserveAspectRatio="none"
+      className="mt-3 h-10 w-full"
       role="img"
       aria-label="Riwayat penggunaan CPU"
     >
-      <polyline points={pts} fill="none" stroke="#0B1F4B" strokeWidth="2" />
+      <defs>
+        <linearGradient id="spark" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#0B1F4B" stopOpacity="0.25" />
+          <stop offset="100%" stopColor="#0B1F4B" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <polygon points={`0,${h} ${pts.join(' ')} ${last},${h}`} fill="url(#spark)" />
+      <polyline
+        points={pts.join(' ')}
+        fill="none"
+        stroke="#0B1F4B"
+        strokeWidth="2"
+        vectorEffect="non-scaling-stroke"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
 
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
+function StatCard({
+  title,
+  icon,
+  children,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="rounded-lg border border-slate-200 p-4">
-      <h2 className="text-sm font-medium text-slate-600">{title}</h2>
-      <div className="mt-2">{children}</div>
+    <div className="card p-5">
+      <h2 className="flex items-center gap-2 text-sm font-medium text-slate-600">
+        <span
+          aria-hidden="true"
+          className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 text-navy"
+        >
+          {icon}
+        </span>
+        {title}
+      </h2>
+      <div className="mt-3">{children}</div>
     </div>
   );
 }
@@ -118,70 +166,107 @@ export function MonitoringPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-navy">Monitoring</h1>
-        <span className="text-xs text-slate-500" aria-live="polite">
-          {isFetching ? 'Memperbarui...' : `Diperbarui otomatis tiap ${REFRESH_MS / 1000} detik`}
-        </span>
-      </div>
+      <PageHeader
+        icon={<Activity className="h-5 w-5" />}
+        title="Monitoring"
+        description={
+          data
+            ? `${data.host} · ${data.os} · kernel ${data.kernel}`
+            : 'Pemakaian CPU, memori, dan disk VM secara langsung.'
+        }
+        actions={
+          <span
+            className="inline-flex items-center gap-2 text-xs text-slate-500"
+            aria-live="polite"
+          >
+            <span
+              aria-hidden="true"
+              className={`h-2 w-2 rounded-full ${isFetching ? 'animate-pulse bg-yellow' : 'bg-green-500'}`}
+            />
+            {isFetching ? 'Memperbarui...' : `Diperbarui otomatis tiap ${REFRESH_MS / 1000} detik`}
+          </span>
+        }
+      />
 
       {error && !data && (
-        <p role="alert" className="mt-4 rounded-md border border-error bg-red-50 p-3 text-red-900">
+        <p
+          role="alert"
+          className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900"
+        >
           {error.message}
         </p>
       )}
       {isLoading && (
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
-          {[0, 1, 2].map((i) => (
-            <Skeleton key={i} className="h-28" />
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-44 rounded-(--radius-card)" />
           ))}
         </div>
       )}
 
       {data && (
         <>
-          <p className="mt-2 text-sm text-slate-600">
-            {data.host} · {data.os} · kernel {data.kernel}
-          </p>
-          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <Card title={`CPU (${data.cpus} inti)`}>
-              <p className="text-2xl font-semibold text-navy">
-                {data.cpuPercent === null ? '-' : `${data.cpuPercent}%`}
-              </p>
-              {data.cpuPercent !== null && <Bar percent={data.cpuPercent} label="Penggunaan CPU" />}
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <StatCard title={`CPU (${data.cpus} inti)`} icon={<Cpu className="h-4 w-4" />}>
+              <div className="flex items-center gap-4">
+                {data.cpuPercent === null ? (
+                  <p className="text-2xl font-semibold text-navy">-</p>
+                ) : (
+                  <Gauge percent={data.cpuPercent} label="Penggunaan CPU" />
+                )}
+                <div className="min-w-0 text-xs text-slate-500">
+                  <p>Beban 1 menit</p>
+                  <p className="text-lg font-semibold text-navy">{data.load[0].toFixed(2)}</p>
+                </div>
+              </div>
               <Sparkline values={data.history} />
-            </Card>
-            <Card title="Memori">
-              <p className="text-2xl font-semibold text-navy">{Math.round(memPct)}%</p>
-              <Bar percent={memPct} label="Penggunaan memori" />
-              <p className="mt-1 text-xs text-slate-600">
-                {formatBytes(data.mem.usedBytes)} dari {formatBytes(data.mem.totalBytes)}
-              </p>
-              {data.mem.swapTotalBytes > 0 && (
-                <p className="mt-1 text-xs text-slate-600">
-                  Swap {formatBytes(data.mem.swapUsedBytes)} /{' '}
-                  {formatBytes(data.mem.swapTotalBytes)} ({Math.round(swapPct)}%)
-                </p>
-              )}
-            </Card>
-            <Card title="Beban rata-rata">
-              <p className="text-2xl font-semibold text-navy">{data.load[0].toFixed(2)}</p>
-              <p className="text-xs text-slate-600">
+            </StatCard>
+
+            <StatCard title="Memori" icon={<MemoryStick className="h-4 w-4" />}>
+              <div className="flex items-center gap-4">
+                <Gauge percent={memPct} label="Penggunaan memori" />
+                <div className="min-w-0 text-xs text-slate-500">
+                  <p className="text-sm font-semibold text-navy">
+                    {formatBytes(data.mem.usedBytes)}
+                  </p>
+                  <p>dari {formatBytes(data.mem.totalBytes)}</p>
+                  {data.mem.swapTotalBytes > 0 && (
+                    <p className="mt-1">
+                      Swap {formatBytes(data.mem.swapUsedBytes)} /{' '}
+                      {formatBytes(data.mem.swapTotalBytes)} ({Math.round(swapPct)}%)
+                    </p>
+                  )}
+                </div>
+              </div>
+            </StatCard>
+
+            <StatCard title="Beban rata-rata" icon={<Gauge2 className="h-4 w-4" />}>
+              <p className="text-3xl font-semibold text-navy">{data.load[0].toFixed(2)}</p>
+              <p className="mt-1 text-xs text-slate-500">
                 1 / 5 / 15 menit: {data.load.map((l) => l.toFixed(2)).join(' / ')}
               </p>
+              <ProgressBar
+                className="mt-3"
+                percent={(data.load[0] / data.cpus) * 100}
+                label="Beban terhadap jumlah inti"
+              />
               {data.load[0] > data.cpus && (
-                <p className="mt-1">
-                  <Badge tone="warning">Beban melebihi jumlah inti CPU</Badge>
+                <p className="mt-2">
+                  <Badge tone="warning" dot>
+                    Melebihi jumlah inti CPU
+                  </Badge>
                 </p>
               )}
-            </Card>
-            <Card title="Uptime">
-              <p className="text-lg font-semibold text-navy">{uptimeText(data.uptimeSeconds)}</p>
-            </Card>
+            </StatCard>
+
+            <StatCard title="Uptime" icon={<Clock className="h-4 w-4" />}>
+              <p className="text-2xl font-semibold text-navy">{uptimeText(data.uptimeSeconds)}</p>
+              <p className="mt-1 text-xs text-slate-500">sejak VM terakhir menyala</p>
+            </StatCard>
           </div>
 
-          <h2 className="mt-8 text-lg font-semibold text-navy">Disk</h2>
-          <div className="mt-2">
+          <div className="mt-8">
+            <SectionTitle>Disk</SectionTitle>
             <Table
               rows={data.disks}
               rowKey={(d) => d.mount}
@@ -195,7 +280,7 @@ export function MonitoringPage() {
                   header: 'Penggunaan',
                   render: (d) => (
                     <div className="min-w-40">
-                      <Bar percent={d.percent} label={`Disk ${d.mount}`} />
+                      <ProgressBar percent={d.percent} label={`Disk ${d.mount}`} />
                     </div>
                   ),
                 },
@@ -208,8 +293,8 @@ export function MonitoringPage() {
             />
           </div>
 
-          <h2 className="mt-8 text-lg font-semibold text-navy">Proses teratas (CPU)</h2>
-          <div className="mt-2">
+          <div className="mt-8">
+            <SectionTitle>Proses teratas (CPU)</SectionTitle>
             <Table
               rows={data.top}
               rowKey={(t) => String(t.pid)}

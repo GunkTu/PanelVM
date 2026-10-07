@@ -1,6 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
-import { Badge, Button, ConfirmDialog, Input, Modal, Table, useToast } from '../../components';
+import { Plus, Server } from 'lucide-react';
+import {
+  Badge,
+  Button,
+  ConfirmDialog,
+  Input,
+  Modal,
+  PageHeader,
+  Table,
+  useToast,
+} from '../../components';
 import { api } from '../../lib/api';
 import type { ClientUser, Modules, Vm } from '../../lib/types';
 
@@ -172,7 +182,7 @@ function ManageVmModal({ vm, onClose }: { vm: Vm; onClose: () => void }) {
           <p
             key={i}
             role="alert"
-            className="rounded-md border border-error bg-red-50 p-3 text-sm text-red-900"
+            className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900"
           >
             {e!.message}
           </p>
@@ -221,7 +231,7 @@ function ManageVmModal({ vm, onClose }: { vm: Vm; onClose: () => void }) {
             Pindai host key
           </Button>
           {scan && (
-            <div className="mt-3 rounded-md border border-slate-300 p-3">
+            <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
               {scan.changed && (
                 <p className="mb-2 font-semibold text-error">
                   Peringatan: fingerprint berbeda dari yang disetujui sebelumnya. Setujui hanya bila
@@ -261,7 +271,7 @@ function ManageVmModal({ vm, onClose }: { vm: Vm; onClose: () => void }) {
           <h3 className="font-semibold text-navy">Client pemilik VM</h3>
           <select
             aria-label="Client pemilik VM"
-            className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2"
+            className="mt-2 w-full h-10 px-3"
             value={vm.assignedTo?.id ?? ''}
             disabled={assign.isPending}
             onChange={(e) => assign.mutate(e.target.value || null)}
@@ -333,11 +343,17 @@ export function AdminVmsPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-navy">Kelola VM</h1>
-        <Button onClick={() => setCreating(true)}>Tambah VM</Button>
-      </div>
-      <div className="mt-4">
+      <PageHeader
+        icon={<Server className="h-5 w-5" />}
+        title="Kelola VM"
+        description="Daftarkan VM, setujui host key SSH, hubungkan ke client, dan atur modul yang aktif."
+        actions={
+          <Button icon={<Plus className="h-4 w-4" />} onClick={() => setCreating(true)}>
+            Tambah VM
+          </Button>
+        }
+      />
+      <div>
         <Table
           rows={data?.items}
           loading={isLoading}

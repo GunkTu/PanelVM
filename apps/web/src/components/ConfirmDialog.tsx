@@ -1,3 +1,4 @@
+import { TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from './Button';
 import { Input } from './Input';
@@ -49,7 +50,15 @@ function ConfirmBody({
         </>
       }
     >
-      <p>{message}</p>
+      <div className="flex gap-3">
+        <span
+          aria-hidden="true"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-50 text-red-600"
+        >
+          <TriangleAlert className="h-5 w-5" />
+        </span>
+        <p className="pt-1">{message}</p>
+      </div>
       {requireText && (
         <div className="mt-4">
           <Input

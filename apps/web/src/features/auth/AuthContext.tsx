@@ -56,7 +56,7 @@ export function RequireAuth({ admin = false, children }: { admin?: boolean; chil
     return (
       <p
         role="alert"
-        className="m-8 rounded-md border border-error bg-red-50 p-4 text-sm text-red-900"
+        className="m-8 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900"
       >
         Tidak bisa memuat data akun. Muat ulang halaman; bila berlanjut, hubungi admin.
       </p>

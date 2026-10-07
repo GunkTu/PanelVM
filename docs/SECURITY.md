@@ -76,6 +76,8 @@ Pemeriksaan tanpa temuan: tidak ada SQL dengan interpolasi (grep), tidak ada `ch
 | better-sqlite3, argon2, otplib, ssh2 | DB panel, hash password/recovery code, TOTP, SSH/SFTP | ditetapkan |
 | react, react-dom, react-router-dom, @tanstack/react-query | SPA | ditetapkan |
 | @xterm/xterm, @xterm/addon-fit, @xterm/addon-web-links | Terminal di browser | ditetapkan |
+| lucide-react | Ikon antarmuka (SVG inline, tanpa permintaan jaringan) | redesain UI |
+| @fontsource-variable/inter | Font Inter dilayani dari origin sendiri (CSP `font-src 'self'`, tanpa CDN) | redesain UI |
 | qrcode | QR untuk setup 2FA | tambahan; menghindari mengetik secret manual |
 | vite, tailwindcss, @tailwindcss/vite, @vitejs/plugin-react | Build dan styling | ditetapkan |
 | vitest, jsdom, @testing-library/*, @playwright/test | Test (unit/integrasi/komponen/E2E) | ditetapkan; Playwright untuk E2E fase akhir |
@@ -92,3 +94,5 @@ npm audit
 ```
 
 Saat menambah endpoint baru: panggil `assertVmAccess`, pasang guard `onRequest`, tambahkan ke matriks IDOR di `test/rbac.test.ts`, dan tambahkan test input berbahaya.
+
+_Catatan UI:_ latar area konten memakai `#f4f6fa` (abu sangat muda) dengan kartu putih, sedikit menyimpang dari "area konten putih" di CLAUDE.md 8 demi kedalaman visual. Teks kuning tidak dipakai di latar putih; tombol utama kuning bersama teks biru tua.

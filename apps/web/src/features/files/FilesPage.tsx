@@ -1,7 +1,30 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Badge, Button, ConfirmDialog, Input, Modal, Skeleton, useToast } from '../../components';
+import {
+  Archive,
+  ArrowUp,
+  ChevronRight,
+  FileArchive,
+  FileText,
+  Folder,
+  FolderOpen,
+  FolderPlus,
+  Link2,
+  Upload,
+} from 'lucide-react';
+import {
+  Badge,
+  Button,
+  ButtonAnchor,
+  ConfirmDialog,
+  Input,
+  Modal,
+  PageHeader,
+  ProgressBar,
+  Skeleton,
+  useToast,
+} from '../../components';
 import { api } from '../../lib/api';
 import { formatBytes, formatTime, joinPath, parentPath } from '../../lib/format';
 import type { FileEntry } from '../../lib/types';
@@ -76,7 +99,7 @@ function Editor({ vmId, path, onClose }: { vmId: string; path: string; onClose: 
     >
       {file.isLoading && <Skeleton className="h-64" />}
       {file.error && (
-        <p role="alert" className="rounded-md border border-error bg-red-50 p-3 text-red-900">
+        <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-900">
           {file.error.message}
         </p>
       )}
@@ -167,117 +190,138 @@ export function FilesPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-semibold text-navy">File Manager</h1>
-      <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-        {QUICK.map(([p, t]) => (
-          <button
-            key={p}
-            type="button"
-            onClick={() => go(p)}
-            className="rounded-full border border-slate-300 px-3 py-1 hover:border-navy"
-          >
-            {t}
-          </button>
-        ))}
-      </div>
-      <nav aria-label="Lokasi" className="mt-3 flex flex-wrap items-center gap-1 text-sm">
-        <button type="button" className="text-info underline" onClick={() => go('/')}>
-          /
-        </button>
-        {crumbs.map((c, i) => (
-          <span key={i} className="flex items-center gap-1">
+      <PageHeader
+        icon={<FolderOpen className="h-5 w-5" />}
+        title="File Manager"
+        description="Jelajahi, unggah, edit, dan kelola file di VM ini."
+      />
+      <div className="card p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          {QUICK.map(([p, t]) => (
             <button
+              key={p}
               type="button"
-              className="text-info underline"
-              onClick={() => go(`/${crumbs.slice(0, i + 1).join('/')}`)}
+              onClick={() => go(p)}
+              className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-sm text-slate-700 transition-colors hover:border-navy hover:bg-white hover:text-navy"
             >
-              {c}
+              {t}
             </button>
-            {i < crumbs.length - 1 && <span>/</span>}
-          </span>
-        ))}
-      </nav>
-      <div className="mt-3 flex flex-wrap gap-2">
-        <Button variant="ghost" disabled={path === '/'} onClick={() => go(parentPath(path))}>
-          Naik
-        </Button>
-        <Button variant="secondary" onClick={() => setDialog({ kind: 'mkdir' })}>
-          Folder baru
-        </Button>
-        <Button onClick={() => fileInput.current?.click()} loading={progress !== null}>
-          Unggah file
-        </Button>
-        <input
-          ref={fileInput}
-          type="file"
-          multiple
-          hidden
-          onChange={(e) => void upload(e.target.files)}
-        />
-        <Button
-          variant="ghost"
-          disabled={selected.size === 0}
-          onClick={() => {
-            setName(`arsip-${Date.now().toString(36)}.tar.gz`);
-            setDialog({ kind: 'archive' });
-          }}
-        >
-          Arsipkan ({selected.size})
-        </Button>
-      </div>
-      {progress !== null && (
-        <div
-          className="mt-2"
-          role="progressbar"
-          aria-valuenow={progress}
-          aria-valuemin={0}
-          aria-valuemax={100}
-        >
-          <div className="h-2 rounded bg-slate-200">
-            <div className="h-2 rounded bg-yellow" style={{ width: `${progress}%` }} />
-          </div>
-          <p className="mt-1 text-xs text-slate-600">Mengunggah {progress}%</p>
+          ))}
         </div>
-      )}
+        <nav
+          aria-label="Lokasi"
+          className="mt-3 flex flex-wrap items-center gap-0.5 rounded-lg bg-slate-50 px-4 py-2.5 font-mono text-sm"
+        >
+          <button
+            type="button"
+            className="rounded px-1 text-info hover:bg-blue-50 hover:underline"
+            onClick={() => go('/')}
+          >
+            /
+          </button>
+          {crumbs.map((c, i) => (
+            <span key={i} className="flex items-center gap-0.5">
+              <button
+                type="button"
+                className="rounded px-1 text-info hover:bg-blue-50 hover:underline"
+                onClick={() => go(`/${crumbs.slice(0, i + 1).join('/')}`)}
+              >
+                {c}
+              </button>
+              {i < crumbs.length - 1 && (
+                <ChevronRight aria-hidden="true" className="h-3.5 w-3.5 text-slate-400" />
+              )}
+            </span>
+          ))}
+        </nav>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button
+            variant="ghost"
+            icon={<ArrowUp className="h-4 w-4" />}
+            disabled={path === '/'}
+            onClick={() => go(parentPath(path))}
+          >
+            Naik
+          </Button>
+          <Button
+            variant="secondary"
+            icon={<FolderPlus className="h-4 w-4" />}
+            onClick={() => setDialog({ kind: 'mkdir' })}
+          >
+            Folder baru
+          </Button>
+          <Button
+            icon={<Upload className="h-4 w-4" />}
+            onClick={() => fileInput.current?.click()}
+            loading={progress !== null}
+          >
+            Unggah file
+          </Button>
+          <input
+            ref={fileInput}
+            type="file"
+            multiple
+            hidden
+            onChange={(e) => void upload(e.target.files)}
+          />
+          <Button
+            variant="ghost"
+            icon={<Archive className="h-4 w-4" />}
+            disabled={selected.size === 0}
+            onClick={() => {
+              setName(`arsip-${Date.now().toString(36)}.tar.gz`);
+              setDialog({ kind: 'archive' });
+            }}
+          >
+            Arsipkan ({selected.size})
+          </Button>
+        </div>
+        {progress !== null && (
+          <div className="mt-3">
+            <ProgressBar percent={progress} label="Progres unggah" />
+            <p className="mt-1 text-xs text-slate-600">Mengunggah {progress}%</p>
+          </div>
+        )}
+      </div>
 
-      <div className="mt-4 overflow-x-auto rounded-md border border-slate-200">
+      <div className="card mt-4 overflow-x-auto">
         <table className="w-full text-left text-sm">
-          <thead className="bg-slate-50 text-slate-600">
+          <thead className="border-b border-slate-200 bg-slate-50/80 text-xs tracking-wide text-slate-500 uppercase">
             <tr>
-              <th className="w-8 px-3 py-2" />
-              <th className="px-3 py-2 font-medium">Nama</th>
-              <th className="px-3 py-2 font-medium">Ukuran</th>
-              <th className="px-3 py-2 font-medium">Izin</th>
-              <th className="px-3 py-2 font-medium">Diubah</th>
-              <th className="px-3 py-2 font-medium">Aksi</th>
+              <th className="w-10 px-4 py-3" />
+              <th className="px-4 py-3 font-semibold">Nama</th>
+              <th className="px-4 py-3 font-semibold">Ukuran</th>
+              <th className="px-4 py-3 font-semibold">Izin</th>
+              <th className="px-4 py-3 font-semibold">Diubah</th>
+              <th className="px-4 py-3 font-semibold">Aksi</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {list.isLoading &&
               [0, 1, 2].map((i) => (
                 <tr key={i}>
-                  <td colSpan={6} className="px-3 py-3">
+                  <td colSpan={6} className="px-4 py-3">
                     <Skeleton />
                   </td>
                 </tr>
               ))}
             {list.error && (
               <tr>
-                <td colSpan={6} className="px-3 py-6 text-center text-error" role="alert">
+                <td colSpan={6} className="px-4 py-8 text-center text-error" role="alert">
                   {list.error.message}
                 </td>
               </tr>
             )}
             {list.data && items.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-3 py-8 text-center text-slate-500">
+                <td colSpan={6} className="px-4 py-12 text-center text-slate-500">
                   Folder ini kosong. Unggah file atau buat folder baru.
                 </td>
               </tr>
             )}
             {items.map((e) => (
-              <tr key={e.name}>
-                <td className="px-3 py-2">
+              <tr key={e.name} className="transition-colors hover:bg-slate-50/70">
+                <td className="px-4 py-2.5">
                   <input
                     type="checkbox"
                     aria-label={`Pilih ${e.name}`}
@@ -285,40 +329,51 @@ export function FilesPage() {
                     onChange={() => toggle(e.name)}
                   />
                 </td>
-                <td className="px-3 py-2">
+                <td className="px-4 py-2.5">
                   {e.type === 'dir' ? (
                     <button
                       type="button"
-                      className="font-medium text-navy hover:underline"
+                      className="inline-flex items-center gap-2 font-medium text-navy hover:underline"
                       onClick={() => go(joinPath(path, e.name))}
                     >
-                      📁 {e.name}
+                      <Folder aria-hidden="true" className="h-4 w-4 shrink-0 text-amber-500" />
+                      {e.name}
                     </button>
                   ) : (
-                    <span>
-                      {e.isLink ? '🔗' : '📄'} {e.name}
+                    <span className="inline-flex items-center gap-2">
+                      {e.isLink ? (
+                        <Link2 aria-hidden="true" className="h-4 w-4 shrink-0 text-slate-400" />
+                      ) : isArchive(e.name) ? (
+                        <FileArchive
+                          aria-hidden="true"
+                          className="h-4 w-4 shrink-0 text-violet-500"
+                        />
+                      ) : (
+                        <FileText aria-hidden="true" className="h-4 w-4 shrink-0 text-slate-400" />
+                      )}
+                      {e.name}
                     </span>
                   )}
                 </td>
-                <td className="px-3 py-2 text-slate-600">
+                <td className="px-4 py-2.5 text-slate-600">
                   {e.type === 'dir' ? '-' : formatBytes(e.size)}
                 </td>
-                <td className="px-3 py-2 font-mono text-xs">{e.mode}</td>
-                <td className="px-3 py-2 text-slate-600">{formatTime(e.mtime)}</td>
-                <td className="px-3 py-2">
+                <td className="px-4 py-2.5 font-mono text-xs">{e.mode}</td>
+                <td className="px-4 py-2.5 text-slate-600">{formatTime(e.mtime)}</td>
+                <td className="px-4 py-2.5">
                   <div className="flex flex-wrap gap-1">
                     {e.type === 'file' && (
-                      <a
-                        className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:border-navy"
+                      <ButtonAnchor
+                        size="sm"
                         href={`/api/vms/${vmId}/files/download?path=${encodeURIComponent(joinPath(path, e.name))}`}
                       >
                         Unduh
-                      </a>
+                      </ButtonAnchor>
                     )}
                     {e.type === 'file' && (
                       <Button
                         variant="ghost"
-                        className="!px-2 !py-1 text-xs"
+                        size="sm"
                         onClick={() => setEditing(joinPath(path, e.name))}
                       >
                         Edit
@@ -327,7 +382,7 @@ export function FilesPage() {
                     {e.type === 'file' && isArchive(e.name) && (
                       <Button
                         variant="ghost"
-                        className="!px-2 !py-1 text-xs"
+                        size="sm"
                         onClick={() =>
                           act.mutate({
                             endpoint: 'extract',
@@ -341,7 +396,7 @@ export function FilesPage() {
                     )}
                     <Button
                       variant="ghost"
-                      className="!px-2 !py-1 text-xs"
+                      size="sm"
                       onClick={() => {
                         setName(e.name);
                         setDialog({ kind: 'rename', entry: e });
@@ -351,7 +406,7 @@ export function FilesPage() {
                     </Button>
                     <Button
                       variant="ghost"
-                      className="!px-2 !py-1 text-xs"
+                      size="sm"
                       onClick={() => {
                         setMode(e.mode);
                         setRecursive(false);
@@ -362,7 +417,8 @@ export function FilesPage() {
                     </Button>
                     <Button
                       variant="ghost"
-                      className="!px-2 !py-1 text-xs !text-error"
+                      size="sm"
+                      className="!text-error"
                       onClick={() => setDialog({ kind: 'delete', entry: e })}
                     >
                       Hapus

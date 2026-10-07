@@ -1,14 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Database as DatabaseIcon, Plus, Terminal, UserPlus } from 'lucide-react';
 import {
   Badge,
   Button,
+  ButtonAnchor,
+  ButtonLink,
   ConfirmDialog,
+  EmptyState,
   Input,
   Modal,
+  PageHeader,
+  SectionTitle,
   Skeleton,
   Table,
+  Tabs,
   useToast,
 } from '../../components';
 import { api } from '../../lib/api';
@@ -56,7 +62,7 @@ function CredentialsModal({ cred, onClose }: { cred: Credentials; onClose: () =>
       onClose={onClose}
       footer={<Button onClick={onClose}>Sudah saya simpan</Button>}
     >
-      <p className="rounded-md border border-warning bg-yellow-50 p-3 text-yellow-900">
+      <p className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
         Password hanya ditampilkan sekali ini dan tidak disimpan di panel. Salin sekarang. Bila
         hilang, buat password baru lewat "Reset password".
       </p>
@@ -75,7 +81,7 @@ function CredentialsModal({ cred, onClose }: { cred: Credentials; onClose: () =>
       <p className="mt-3 text-slate-600">
         Untuk Laravel, tempel ke file <code>.env</code> situs:
       </p>
-      <pre className="mt-1 select-all whitespace-pre-wrap rounded-md bg-slate-100 p-3 font-mono text-xs">
+      <pre className="mt-1 select-all whitespace-pre-wrap rounded-xl bg-slate-100 p-4 font-mono text-xs">
         {cred.envSnippet}
       </pre>
       <Button variant="ghost" className="mt-2" onClick={() => copy(cred.envSnippet)}>
@@ -133,7 +139,7 @@ function QueryEditor({
       </label>
       <select
         id="qdb"
-        className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+        className="mt-1 w-full h-10 px-3"
         value={db}
         onChange={(e) => setDb(e.target.value)}
       >
@@ -152,7 +158,10 @@ function QueryEditor({
         onChange={(e) => setSql(e.target.value)}
       />
       {run.error && (
-        <p role="alert" className="mt-2 rounded-md border border-error bg-red-50 p-3 text-red-900">
+        <p
+          role="alert"
+          className="mt-2 rounded-xl border border-red-200 bg-red-50 p-4 text-red-900"
+        >
           {run.error.message}
         </p>
       )}
@@ -333,49 +342,56 @@ export function DatabasesPage() {
 
   return (
     <div>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-semibold text-navy">Database</h1>
-        {mysql?.managed && (
-          <div className="flex gap-2">
-            <Button variant="ghost" onClick={() => setQuery(null)}>
-              Query editor
-            </Button>
-            <Button onClick={() => setCreating(true)}>Buat database</Button>
-          </div>
-        )}
-      </div>
+      <PageHeader
+        icon={<DatabaseIcon className="h-5 w-5" />}
+        title="Database"
+        description="Buat database dan user, atur hak akses, import dan export, serta jalankan query."
+        actions={
+          mysql?.managed ? (
+            <>
+              <Button
+                variant="ghost"
+                icon={<Terminal className="h-4 w-4" />}
+                onClick={() => setQuery(null)}
+              >
+                Query editor
+              </Button>
+              <Button icon={<Plus className="h-4 w-4" />} onClick={() => setCreating(true)}>
+                Buat database
+              </Button>
+            </>
+          ) : undefined
+        }
+      />
 
       {engines.data && (
-        <div role="tablist" aria-label="Engine database" className="mt-3 flex gap-2">
-          {(['mysql', 'postgres'] as const).map((k) => {
-            const i = infoOf(k);
-            const label =
-              k === 'postgres'
-                ? 'PostgreSQL'
-                : i?.flavor === 'mariadb'
-                  ? 'MariaDB'
-                  : i?.flavor === 'mysql' && i.version
-                    ? 'MySQL'
-                    : 'MySQL / MariaDB';
-            return (
-              <button
-                key={k}
-                type="button"
-                role="tab"
-                aria-selected={engine === k}
-                onClick={() => setChosen(k)}
-                className={`rounded-md border px-3 py-1.5 text-sm ${engine === k ? 'border-navy bg-navy text-white' : 'border-slate-300 hover:border-navy'}`}
-              >
-                {label} {i?.version ?? ''}
-              </button>
-            );
-          })}
+        <div className="mb-4">
+          <Tabs
+            label="Engine database"
+            value={engine}
+            onChange={setChosen}
+            items={(['mysql', 'postgres'] as const).map((k) => {
+              const i = infoOf(k);
+              const label =
+                k === 'postgres'
+                  ? 'PostgreSQL'
+                  : i?.flavor === 'mariadb'
+                    ? 'MariaDB'
+                    : i?.flavor === 'mysql' && i.version
+                      ? 'MySQL'
+                      : 'MySQL / MariaDB';
+              return { key: k, label: `${label} ${i?.version ?? ''}`.trim() };
+            })}
+          />
         </div>
       )}
 
       {engines.isLoading && <Skeleton className="mt-4 h-20" />}
       {engines.error && (
-        <p role="alert" className="mt-4 rounded-md border border-error bg-red-50 p-3 text-red-900">
+        <p
+          role="alert"
+          className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-red-900"
+        >
           {engines.error.message}
         </p>
       )}
@@ -384,7 +400,7 @@ export function DatabasesPage() {
           {engines.data.engines
             .filter((e) => e.engine === engine && e.version)
             .map((e) => (
-              <div key={e.engine} className="rounded-lg border border-slate-200 p-4">
+              <div key={e.engine} className="card p-5">
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-navy">
                     {e.engine === 'postgres'
@@ -406,21 +422,27 @@ export function DatabasesPage() {
               </div>
             ))}
           {!mysql?.version && (
-            <div className="rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-700">
-              Belum ada {engine === 'postgres' ? 'PostgreSQL' : 'MySQL/MariaDB'} di VM ini.{' '}
-              <Link className="text-info underline" to={`/vms/${vmId}/software`}>
-                Pasang dari menu Aplikasi
-              </Link>
-              , lalu kembali ke sini.
-            </div>
+            <EmptyState
+              className="md:col-span-2"
+              icon={<DatabaseIcon className="h-6 w-6" />}
+              title={`${engine === 'postgres' ? 'PostgreSQL' : 'MySQL/MariaDB'} belum terpasang di VM ini`}
+              description="Pasang dari menu Aplikasi dengan satu klik, lalu kembali ke halaman ini untuk membuat database."
+              action={
+                <ButtonLink to={`/vms/${vmId}/software`} variant="secondary">
+                  Buka menu Aplikasi
+                </ButtonLink>
+              }
+            />
           )}
         </div>
       )}
 
       {mysql?.managed && (
         <>
-          <h2 className="mt-8 text-lg font-semibold text-navy">Database</h2>
-          <div className="mt-2">
+          <div className="mt-8">
+            <SectionTitle>Database</SectionTitle>
+          </div>
+          <div>
             <Table
               rows={overview.data?.databases}
               loading={overview.isLoading}
@@ -434,22 +456,18 @@ export function DatabasesPage() {
                   header: 'Aksi',
                   render: (d) => (
                     <div className="flex flex-wrap gap-1">
-                      <Button
-                        variant="ghost"
-                        className="!px-2 !py-1 text-xs"
-                        onClick={() => setQuery(d.name)}
-                      >
+                      <Button variant="ghost" size="sm" onClick={() => setQuery(d.name)}>
                         Query
                       </Button>
-                      <a
-                        className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:border-navy"
+                      <ButtonAnchor
+                        size="sm"
                         href={`${base}/export?database=${encodeURIComponent(d.name)}&engine=${engine}`}
                       >
                         Export
-                      </a>
+                      </ButtonAnchor>
                       <Button
                         variant="ghost"
-                        className="!px-2 !py-1 text-xs"
+                        size="sm"
                         onClick={() => {
                           setImportDb(d.name);
                           setTimeout(() => fileInput.current?.click(), 0);
@@ -459,7 +477,8 @@ export function DatabasesPage() {
                       </Button>
                       <Button
                         variant="ghost"
-                        className="!px-2 !py-1 text-xs !text-error"
+                        size="sm"
+                        className="!text-error"
                         onClick={() => setDropDb(d.name)}
                       >
                         Hapus
@@ -484,15 +503,19 @@ export function DatabasesPage() {
           )}
 
           {engine === 'postgres' && (
-            <p className="mt-3 rounded-md bg-slate-50 p-3 text-sm text-slate-600">
+            <p className="mt-3 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
               PostgreSQL: akses "Penuh" berarti user menjadi <strong>pemilik</strong> database.
               "Baca saja" mencakup tabel yang ada saat ini; tabel baru perlu "Beri akses" ulang.
               Objek yang dibuat user sendiri tetap miliknya meski aksesnya dicabut.
             </p>
           )}
           <div className="mt-8 flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-navy">User database</h2>
-            <Button variant="ghost" onClick={() => setNewUser('')}>
+            <SectionTitle>User database</SectionTitle>
+            <Button
+              variant="ghost"
+              icon={<UserPlus className="h-4 w-4" />}
+              onClick={() => setNewUser('')}
+            >
               Tambah user
             </Button>
           </div>
@@ -535,7 +558,7 @@ export function DatabasesPage() {
                     <div className="flex flex-wrap gap-1">
                       <Button
                         variant="ghost"
-                        className="!px-2 !py-1 text-xs"
+                        size="sm"
                         onClick={() => {
                           setGrant({ database: dbNames[0] ?? '', level: 'all' });
                           setGrantFor(u);
@@ -545,7 +568,7 @@ export function DatabasesPage() {
                       </Button>
                       <Button
                         variant="ghost"
-                        className="!px-2 !py-1 text-xs"
+                        size="sm"
                         loading={resetPw.isPending}
                         onClick={() => resetPw.mutate(u.name)}
                       >
@@ -553,7 +576,8 @@ export function DatabasesPage() {
                       </Button>
                       <Button
                         variant="ghost"
-                        className="!px-2 !py-1 text-xs !text-error"
+                        size="sm"
+                        className="!text-error"
                         onClick={() => setDropUser(u.name)}
                       >
                         Hapus
@@ -657,7 +681,7 @@ export function DatabasesPage() {
         </label>
         <select
           id="gdb"
-          className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+          className="mt-1 w-full h-10 px-3"
           value={grant.database}
           onChange={(e) => setGrant((g) => ({ ...g, database: e.target.value }))}
         >
@@ -670,7 +694,7 @@ export function DatabasesPage() {
         </label>
         <select
           id="glv"
-          className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+          className="mt-1 w-full h-10 px-3"
           value={grant.level}
           onChange={(e) => setGrant((g) => ({ ...g, level: e.target.value }))}
         >

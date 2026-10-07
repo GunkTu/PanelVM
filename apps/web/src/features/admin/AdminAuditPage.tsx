@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { Badge, Table } from '../../components';
+import { ScrollText } from 'lucide-react';
+import { Badge, PageHeader, Table } from '../../components';
 import { api } from '../../lib/api';
 import { formatTime } from '../../lib/format';
 import type { AuditItem } from '../../lib/types';
@@ -11,11 +12,12 @@ export function AdminAuditPage() {
   });
   return (
     <div>
-      <h1 className="text-2xl font-semibold text-navy">Audit Log</h1>
-      <p className="mt-1 text-sm text-slate-600">
-        100 catatan terbaru. Isi file, password, dan keystroke tidak pernah dicatat.
-      </p>
-      <div className="mt-4">
+      <PageHeader
+        icon={<ScrollText className="h-5 w-5" />}
+        title="Audit Log"
+        description="100 catatan terbaru. Isi file, password, dan keystroke tidak pernah dicatat."
+      />
+      <div>
         <Table
           rows={data?.items}
           loading={isLoading}

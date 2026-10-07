@@ -1,6 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
-import { Badge, Button, ConfirmDialog, Input, Modal, Table, useToast } from '../../components';
+import { UserPlus, Users } from 'lucide-react';
+import {
+  Badge,
+  Button,
+  ConfirmDialog,
+  Input,
+  Modal,
+  PageHeader,
+  Table,
+  useToast,
+} from '../../components';
 import { api } from '../../lib/api';
 import { formatTime } from '../../lib/format';
 import type { ClientUser } from '../../lib/types';
@@ -85,11 +95,17 @@ export function AdminUsersPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-navy">Kelola Pengguna</h1>
-        <Button onClick={() => setCreating(true)}>Tambah client</Button>
-      </div>
-      <div className="mt-4">
+      <PageHeader
+        icon={<Users className="h-5 w-5" />}
+        title="Kelola Pengguna"
+        description="Buat akun client, tangguhkan akses, dan reset 2FA atau password. Akun baru wajib mengaktifkan 2FA saat login pertama."
+        actions={
+          <Button icon={<UserPlus className="h-4 w-4" />} onClick={() => setCreating(true)}>
+            Tambah client
+          </Button>
+        }
+      />
+      <div>
         <Table
           rows={data?.items}
           loading={isLoading}

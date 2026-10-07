@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
+import { Lock, Mail } from 'lucide-react';
 import { Button, Input } from '../../components';
 import { api, setCsrfToken } from '../../lib/api';
 import type { Stage } from '../../lib/types';
@@ -41,6 +42,7 @@ export function LoginPage() {
     >
       <form onSubmit={submit} className="flex flex-col gap-4">
         <Input
+          icon={<Mail className="h-4 w-4" />}
           label="Email"
           type="email"
           autoComplete="username"
@@ -49,6 +51,7 @@ export function LoginPage() {
           required
         />
         <Input
+          icon={<Lock className="h-4 w-4" />}
           label="Password"
           type="password"
           autoComplete="current-password"
