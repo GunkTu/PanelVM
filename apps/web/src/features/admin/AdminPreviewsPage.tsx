@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ExternalLink, Radio } from 'lucide-react';
 import { useState } from 'react';
-import { Badge, Button, ConfirmDialog, PageHeader, Table, useToast } from '../../components';
+import { Badge, Button, ConfirmDialog, Modal, PageHeader, Table, useToast } from '../../components';
 import { api } from '../../lib/api';
 import { formatRemaining, formatTime } from '../../lib/format';
 import type { AdminPreview } from '../../lib/types';
@@ -15,6 +15,8 @@ export function AdminPreviewsPage() {
     queryFn: () => api<{ enabled: boolean; items: AdminPreview[] }>('/api/admin/previews'),
   });
   const [target, setTarget] = useState<AdminPreview | null>(null);
+  const [expiryTarget, setExpiryTarget] = useState<AdminPreview | null>(null);
+  const [duration, setDuration] = useState<string>('30d');
   const onErr = (e: Error) => toast.show('error', e.message);
 
   const revoke = useMutation({
@@ -22,6 +24,16 @@ export function AdminPreviewsPage() {
     onSuccess: async () => {
       toast.show('success', 'Preview dicabut dan semua koneksinya diputus.');
       setTarget(null);
+      await qc.invalidateQueries({ queryKey: ['admin-previews'] });
+    },
+    onError: onErr,
+  });
+  const setExpiry = useMutation({
+    mutationFn: (p: AdminPreview) =>
+      api(`/api/admin/previews/${p.id}/expiry`, { method: 'POST', body: { duration } }),
+    onSuccess: async () => {
+      toast.show('success', 'Masa berlaku preview diubah. Pemilik diberi tahu lewat notifikasi.');
+      setExpiryTarget(null);
       await qc.invalidateQueries({ queryKey: ['admin-previews'] });
     },
     onError: onErr,
@@ -139,6 +151,16 @@ export function AdminPreviewsPage() {
                   <Button
                     size="sm"
                     variant="ghost"
+                    onClick={() => {
+                      setDuration(p.permanent ? 'permanent' : '30d');
+                      setExpiryTarget(p);
+                    }}
+                  >
+                    Masa berlaku
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
                     className="!text-error"
                     onClick={() => setTarget(p)}
                   >
@@ -150,6 +172,53 @@ export function AdminPreviewsPage() {
           ]}
         />
       </div>
+
+      <Modal
+        open={!!expiryTarget}
+        title="Atur masa berlaku preview"
+        onClose={() => setExpiryTarget(null)}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setExpiryTarget(null)}>
+              Batal
+            </Button>
+            <Button
+              loading={setExpiry.isPending}
+              onClick={() => expiryTarget && setExpiry.mutate(expiryTarget)}
+            >
+              Simpan
+            </Button>
+          </>
+        }
+      >
+        {expiryTarget && (
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-slate-600">
+              Preview port {expiryTarget.port} milik {expiryTarget.owner} di VM "
+              {expiryTarget.vmName}". Sekarang: {formatRemaining(expiryTarget.expiresAt)}.
+            </p>
+            <label className="text-sm font-medium text-slate-700" htmlFor="expiry">
+              Berlaku selama (dihitung dari sekarang)
+            </label>
+            <select
+              id="expiry"
+              className="h-10 w-full px-3"
+              value={duration}
+              onChange={(e) => setDuration(e.target.value)}
+            >
+              <option value="30d">1 bulan (30 hari)</option>
+              <option value="90d">3 bulan</option>
+              <option value="180d">6 bulan</option>
+              <option value="365d">1 tahun</option>
+              <option value="permanent">Permanen (sampai dicabut)</option>
+            </select>
+            <p className="text-xs text-slate-500">
+              Preview permanen tidak bisa diubah oleh pemilik, hanya dicabut. Pemilik diberi tahu
+              lewat notifikasi.
+            </p>
+          </div>
+        )}
+      </Modal>
 
       <ConfirmDialog
         open={!!target}

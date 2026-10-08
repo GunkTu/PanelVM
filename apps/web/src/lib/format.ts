@@ -6,6 +6,7 @@ export const formatTime = (ms: number | null): string =>
 /** Sisa waktu menuju `target` dalam bahasa Indonesia, mis. "1 hari 2 jam", "45 menit", atau "Berakhir". */
 export function formatRemaining(target: number, now: number = Date.now()): string {
   const diff = target - now;
+  if (target >= 253_402_300_799_000) return 'Permanen';
   if (diff <= 0) return 'Berakhir';
   const minutes = Math.floor(diff / 60_000);
   const days = Math.floor(minutes / 1440);

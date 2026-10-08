@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { WebSocket, WebSocketServer } from 'ws';
@@ -848,5 +849,101 @@ describe('batas tebakan alias', () => {
       else expect(res.status).toBe(404);
     }
     expect(limited).toBeGreaterThan(0);
+  });
+});
+
+describe('masa berlaku diatur admin', () => {
+  let pv: PreviewDto & { permanent: boolean };
+
+  beforeAll(async () => {
+    const r = await createPreview(a, vmA, { port: closedPort + 20, ttlHours: 1 });
+    expect(r.statusCode).toBe(201);
+    pv = r.json() as typeof pv;
+    expect(pv.permanent).toBe(false);
+  });
+  afterAll(async () => {
+    await call(app, a, 'DELETE', `/api/vms/${vmA}/previews/${pv.id}`);
+  });
+
+  const setExpiry = (c: Client, duration: unknown) =>
+    call(app, c, 'POST', `/api/admin/previews/${pv.id}/expiry`, { duration });
+
+  it('hanya admin yang bisa mengubah masa berlaku (client 403, tanpa login 401)', async () => {
+    expect((await setExpiry(a, '30d')).statusCode).toBe(403);
+    expect((await setExpiry(b, 'permanent')).statusCode).toBe(403);
+    expect(
+      (await call(app, null, 'POST', `/api/admin/previews/${pv.id}/expiry`, {})).statusCode,
+    ).toBe(401);
+  });
+
+  it('pilihan tidak dikenal ditolak; id tidak ada -> 404', async () => {
+    for (const d of ['7d', '1y', 'selamanya', '', null, 30]) {
+      expect((await setExpiry(admin, d)).statusCode, String(d)).toBe(400);
+    }
+    const missing = await call(app, admin, 'POST', `/api/admin/previews/${randomUUID()}/expiry`, {
+      duration: '30d',
+    });
+    expect(missing.statusCode).toBe(404);
+  });
+
+  it('1 bulan: berlaku 30 hari dari sekarang, pemilik diberi notifikasi, audit tercatat', async () => {
+    const res = await setExpiry(admin, '30d');
+    expect(res.statusCode).toBe(200);
+    const dto = res.json() as typeof pv;
+    expect(dto.permanent).toBe(false);
+    expect(dto.expiresAt).toBeGreaterThan(Date.now() + 29.9 * 86_400_000);
+    expect(dto.expiresAt).toBeLessThan(Date.now() + 30.1 * 86_400_000);
+    const note = ctx.db
+      .prepare(
+        "SELECT message FROM notifications WHERE user_id = ? AND type = 'preview_expiry' ORDER BY created_at DESC",
+      )
+      .get(userA.row.id) as { message: string };
+    expect(note.message).toMatch(/30 hari/);
+    const audit = ctx.db
+      .prepare("SELECT meta FROM audit_logs WHERE action = 'preview.expiry' ORDER BY id DESC")
+      .get() as {
+      meta: string;
+    };
+    expect(JSON.parse(audit.meta)).toMatchObject({ duration: '30d', byAdmin: true });
+  });
+
+  it('perpanjang oleh client tidak pernah memperpendek masa berlaku yang lebih lama', async () => {
+    const before = (await call(app, a, 'GET', `/api/vms/${vmA}/previews`))
+      .json()
+      .items.find((p: PreviewDto) => p.id === pv.id);
+    const res = await call(app, a, 'POST', `/api/vms/${vmA}/previews/${pv.id}/extend`, {
+      ttlHours: 1,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().expiresAt).toBeGreaterThanOrEqual(before.expiresAt);
+  });
+
+  it('permanen: tampil permanen, tidak ikut disapu, dan client tidak bisa memperpanjang (409)', async () => {
+    const res = await setExpiry(admin, 'permanent');
+    expect(res.statusCode).toBe(200);
+    expect(res.json().permanent).toBe(true);
+
+    ctx.previews.sweep();
+    const list = await call(app, a, 'GET', `/api/vms/${vmA}/previews`);
+    const item = list.json().items.find((p: PreviewDto) => p.id === pv.id);
+    expect(item.permanent).toBe(true);
+
+    const extend = await call(app, a, 'POST', `/api/vms/${vmA}/previews/${pv.id}/extend`, {
+      ttlHours: 5,
+    });
+    expect(extend.statusCode).toBe(409);
+    expect(extend.json().error).toBe('preview_permanent');
+
+    const adminList = await call(app, admin, 'GET', '/api/admin/previews');
+    expect(
+      adminList.json().items.find((p: PreviewDto & { permanent: boolean }) => p.id === pv.id)
+        .permanent,
+    ).toBe(true);
+  });
+
+  it('bisa diturunkan lagi ke masa berlaku terbatas, dan tetap bisa dicabut', async () => {
+    const res = await setExpiry(admin, '90d');
+    expect(res.json().permanent).toBe(false);
+    expect(res.json().expiresAt).toBeLessThan(Date.now() + 91 * 86_400_000);
   });
 });

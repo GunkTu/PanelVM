@@ -288,7 +288,9 @@ export function PreviewsPage() {
 
             <p className="mt-2 flex items-center gap-1.5 text-xs text-slate-500">
               <Clock aria-hidden="true" className="h-3.5 w-3.5" />
-              Berakhir dalam {formatRemaining(p.expiresAt)}
+              {p.permanent
+                ? 'Permanen (diatur admin)'
+                : `Berakhir dalam ${formatRemaining(p.expiresAt)}`}
               <span className="text-slate-300">·</span>
               Akses terakhir {p.lastAccessAt ? formatTime(p.lastAccessAt) : 'belum ada'}
             </p>
@@ -337,6 +339,7 @@ export function PreviewsPage() {
               <Button
                 size="sm"
                 variant="ghost"
+                disabled={p.permanent}
                 onClick={() => {
                   setExtendHours(24);
                   setDialog({ kind: 'extend', preview: p });

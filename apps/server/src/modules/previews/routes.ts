@@ -9,6 +9,7 @@ import { rateLimit } from '../../ratelimit.js';
 import { assertVmAccess, type VmRow } from '../../rbac/index.js';
 import { DOMAIN_RE } from '../sites/nginx.js';
 import { classifyForwardError } from '../../ssh/pool.js';
+import { notify } from '../notifications/service.js';
 import { sshTargetFor } from '../vms/service.js';
 import { aliasError, MAX_PREVIEW_PASSWORD, MIN_PREVIEW_PASSWORD } from './access.js';
 import {
@@ -17,6 +18,9 @@ import {
   MAX_PREVIEWS_PER_VM,
   MAX_TTL_HOURS,
   newSubdomain,
+  ADMIN_EXPIRY_DAYS,
+  isPermanent,
+  PERMANENT_EXPIRES_AT,
   isPreviewPort,
   type PreviewRow,
 } from './service.js';
@@ -101,6 +105,7 @@ export function previewRoutes(app: FastifyInstance, ctx: Ctx): void {
     url: previews.urlFor(p.subdomain),
     createdAt: p.created_at,
     expiresAt: p.expires_at,
+    permanent: isPermanent(p.expires_at),
     lastAccessAt: p.last_access_at,
     connections: previews.connectionCount(p.id),
   });
@@ -264,7 +269,16 @@ export function previewRoutes(app: FastifyInstance, ctx: Ctx): void {
       const { previewId } = previewParams.parse(req.params);
       const { ttlHours: hours } = z.object({ ttlHours }).parse(req.body);
       load(vm, previewId);
-      const expires = Date.now() + hours * 3_600_000;
+      const current = load(vm, previewId);
+      if (isPermanent(current.expires_at)) {
+        throw new AppError(
+          409,
+          'preview_permanent',
+          'Preview ini permanen (diatur admin), jadi tidak perlu diperpanjang.',
+        );
+      }
+      // Memperpanjang tidak pernah memperpendek masa berlaku yang sudah lebih lama (mis. diatur admin).
+      const expires = Math.max(current.expires_at, Date.now() + hours * 3_600_000);
       db.prepare('UPDATE previews SET expires_at = ?, warned_at = NULL WHERE id = ?').run(
         expires,
         previewId,
@@ -361,6 +375,45 @@ export function previewRoutes(app: FastifyInstance, ctx: Ctx): void {
         };
       }),
     };
+  });
+
+  /** Admin: ubah masa berlaku preview mana pun, dari 30 hari sampai permanen (dihitung dari sekarang). */
+  app.post('/api/admin/previews/:previewId/expiry', { onRequest: requireAdmin }, async (req) => {
+    const { previewId } = idParams.parse(req.params);
+    const { duration } = z
+      .object({ duration: z.enum(['30d', '90d', '180d', '365d', 'permanent']) })
+      .parse(req.body);
+    const p = db
+      .prepare('SELECT * FROM previews WHERE id = ? AND expires_at > ?')
+      .get(previewId, Date.now()) as PreviewRow | undefined;
+    if (!p) throw notFound('Preview');
+    const expires =
+      duration === 'permanent'
+        ? PERMANENT_EXPIRES_AT
+        : Date.now() + ADMIN_EXPIRY_DAYS[duration] * 86_400_000;
+    db.prepare('UPDATE previews SET expires_at = ?, warned_at = NULL WHERE id = ?').run(
+      expires,
+      p.id,
+    );
+    audit.record({
+      userId: actor(req).id,
+      vmId: p.vm_id,
+      ip: req.ip,
+      action: 'preview.expiry',
+      target: `port:${p.port}`,
+      result: 'ok',
+      meta: { duration, byAdmin: true },
+    });
+    notify(
+      db,
+      p.user_id,
+      'preview_expiry',
+      'Masa berlaku preview diubah admin',
+      duration === 'permanent'
+        ? `Preview untuk port ${p.port} kini permanen sampai dicabut.`
+        : `Preview untuk port ${p.port} kini berlaku ${ADMIN_EXPIRY_DAYS[duration]} hari dari sekarang.`,
+    );
+    return toPublic(db.prepare('SELECT * FROM previews WHERE id = ?').get(p.id) as PreviewRow);
   });
 
   /** Admin: cabut preview mana pun tanpa perlu tahu VM-nya. */

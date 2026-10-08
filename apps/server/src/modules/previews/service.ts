@@ -14,6 +14,11 @@ export const isPreviewPort = (p: number): boolean =>
 export const MAX_PREVIEWS_PER_VM = 3;
 export const DEFAULT_TTL_HOURS = 24;
 export const MAX_TTL_HOURS = 168;
+/** Preview permanen (hanya bisa diatur admin) memakai tanggal jauh di masa depan: 9999-12-31. */
+export const PERMANENT_EXPIRES_AT = 253_402_300_799_000;
+export const isPermanent = (expiresAt: number): boolean => expiresAt >= PERMANENT_EXPIRES_AT;
+/** Pilihan masa berlaku untuk admin, dihitung dari sekarang. */
+export const ADMIN_EXPIRY_DAYS = { '30d': 30, '90d': 90, '180d': 180, '365d': 365 } as const;
 export const MAX_CONNECTIONS_PER_PREVIEW = 64;
 
 const SWEEP_MS = 60_000;

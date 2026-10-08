@@ -101,6 +101,8 @@ export interface Preview {
   url: string;
   createdAt: number;
   expiresAt: number;
+  /** Diatur admin: berlaku sampai dicabut. */
+  permanent: boolean;
   lastAccessAt: number | null;
   connections: number;
 }
