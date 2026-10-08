@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import type { Ctx } from '../../context.js';
 import { parseModules, type VmRow } from '../../rbac/index.js';
 import { notify } from '../notifications/service.js';
+import { accessKey, LABEL_RE, RateWindow } from './access.js';
 
 export const PREVIEW_MIN_PORT = 1024;
 export const PREVIEW_MAX_PORT = 65535;
@@ -33,10 +34,12 @@ export interface PreviewRow {
   expires_at: number;
   last_access_at: number | null;
   warned_at: number | null;
+  access: 'public' | 'password';
+  password_hash: string | null;
+  access_version: number;
 }
 
 const B32 = 'abcdefghijklmnopqrstuvwxyz234567';
-const SUBDOMAIN_RE = /^pv-[a-z2-7]{26}$/;
 
 /** Subdomain acak: "pv-" + 26 karakter base32 (130 bit). Ini sekaligus kunci akses preview. */
 export function newSubdomain(): string {
@@ -53,7 +56,7 @@ export function previewLabel(hostHeader: string | undefined, baseDomain: string)
   const suffix = `.${baseDomain}`;
   if (!host.endsWith(suffix)) return null;
   const label = host.slice(0, -suffix.length);
-  return SUBDOMAIN_RE.test(label) ? label : null;
+  return LABEL_RE.test(label) ? label : null;
 }
 
 export interface ResolvedPreview {
@@ -69,8 +72,25 @@ export class PreviewManager {
   private readonly conns = new Map<string, Set<() => void>>();
   private readonly lastTouch = new Map<string, number>();
   private timer?: NodeJS.Timeout;
+  private readonly attempts = new RateWindow();
+  private readonly misses = new RateWindow();
+  /** Kunci penandatangan cookie akses preview (terpisah dari cookie sesi panel). */
+  readonly accessKey: Buffer;
 
-  constructor(private readonly ctx: Ctx) {}
+  constructor(private readonly ctx: Ctx) {
+    this.accessKey = accessKey(ctx.env.SESSION_SECRET);
+  }
+
+  /** Batas tebakan kata sandi: per (preview, IP) dan per preview secara total. */
+  allowLogin(previewId: string, ip: string): boolean {
+    const w = 10 * 60_000;
+    return this.attempts.allow(`${previewId}|${ip}`, 8, w) && this.attempts.allow(previewId, 60, w);
+  }
+
+  /** Batas tebakan alias: setiap IP hanya boleh membuka sejumlah alamat preview tak dikenal per menit. */
+  allowMiss(ip: string): boolean {
+    return this.misses.allow(ip, 40, 60_000);
+  }
 
   get enabled(): boolean {
     return !!this.ctx.env.PREVIEW_BASE_DOMAIN;
@@ -170,6 +190,8 @@ export class PreviewManager {
 
   /** Bersihkan preview kedaluwarsa/tidak sah, dan beri peringatan satu jam sebelum habis. */
   sweep(): void {
+    this.attempts.prune(10 * 60_000);
+    this.misses.prune(60_000);
     const { db, audit } = this.ctx;
     const now = Date.now();
     const all = db.prepare('SELECT * FROM previews').all() as PreviewRow[];

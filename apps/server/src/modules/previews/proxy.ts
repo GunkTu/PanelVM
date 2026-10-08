@@ -6,6 +6,8 @@ import type { Ctx } from '../../context.js';
 import { AppError } from '../../errors.js';
 import { classifyForwardError } from '../../ssh/pool.js';
 import { sshTargetFor } from '../vms/service.js';
+import { ACCESS_COOKIE, stripCookie } from './access.js';
+import { passwordGate } from './gate.js';
 import { previewLabel } from './service.js';
 
 const HEADER_TIMEOUT_MS = 60_000;
@@ -97,7 +99,7 @@ function sendPage(res: http.ServerResponse, f: Failure): void {
 
 function sendUpgradeFailure(socket: Duplex, f: Failure): void {
   socket.end(
-    `HTTP/1.1 ${f.status} ${f.status === 404 ? 'Not Found' : 'Bad Gateway'}\r\nConnection: close\r\nContent-Length: 0\r\nX-Robots-Tag: noindex\r\n\r\n`,
+    `HTTP/1.1 ${f.status} ${f.status === 404 ? 'Not Found' : f.status === 429 ? 'Too Many Requests' : 'Bad Gateway'}\r\nConnection: close\r\nContent-Length: 0\r\nX-Robots-Tag: noindex\r\n\r\n`,
   );
 }
 
@@ -122,6 +124,12 @@ function upstreamHeaders(
     if (HOP_BY_HOP.has(k) && !(upgrade && (k === 'connection' || k === 'upgrade'))) continue;
     out[k] = v;
   }
+  if (typeof out.cookie === 'string') {
+    // Cookie akses panel tidak boleh bocor ke aplikasi pengguna.
+    const kept = stripCookie(out.cookie, ACCESS_COOKIE);
+    if (kept) out.cookie = kept;
+    else delete out.cookie;
+  }
   out.host = upstreamHost;
   out['x-forwarded-for'] = req.ip;
   out['x-forwarded-host'] = host;
@@ -144,8 +152,20 @@ async function handle(
   for (const h of res.getHeaderNames()) res.removeHeader(h);
 
   const found = ctx.previews.resolve(label);
-  if (!found) return fail(NOT_FOUND);
+  if (!found) {
+    // Batasi tebak-tebakan alias: IP yang terus membuka alamat tak dikenal diperlambat.
+    if (!ctx.previews.allowMiss(req.ip)) {
+      return fail({
+        status: 429,
+        title: 'Terlalu banyak percobaan',
+        message:
+          'Terlalu banyak alamat preview yang tidak dikenal dibuka dari jaringan Anda. Tunggu semenit lalu coba lagi.',
+      });
+    }
+    return fail(NOT_FOUND);
+  }
   const { preview, vm } = found;
+  if (!(await passwordGate(ctx, req, res, preview))) return;
 
   const maxBody = ctx.env.MAX_UPLOAD_MB * 1024 * 1024;
   const declared = Number(req.headers['content-length'] ?? 0);

@@ -95,6 +95,8 @@ export interface Preview {
   label: string;
   /** Domain situs di Nginx VM yang dikirim sebagai header Host (opsional). */
   hostHeader: string | null;
+  /** 'public' = siapa pun yang tahu alamatnya; 'password' = perlu kata sandi. */
+  access: 'public' | 'password';
   /** Alamat publik preview. Ini kunci akses: siapa pun yang punya link bisa melihat aplikasinya. */
   url: string;
   createdAt: number;

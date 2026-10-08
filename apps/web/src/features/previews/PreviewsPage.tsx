@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Clock, Copy, ExternalLink, Eye, Plus, Radio, Trash2 } from 'lucide-react';
+import { Clock, Copy, ExternalLink, Eye, Lock, Plus, Radio, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import {
   Badge,
@@ -22,6 +22,7 @@ interface PreviewList {
   enabled: boolean;
   maxPerVm: number;
   maxTtlHours?: number;
+  baseDomain?: string | null;
   items: Preview[];
 }
 
@@ -33,7 +34,17 @@ export const TTL_OPTIONS = [
   { hours: 168, label: '7 hari' },
 ] as const;
 
-type Dialog = { kind: 'extend' | 'revoke'; preview: Preview } | null;
+const EMPTY_FORM = {
+  port: '',
+  label: '',
+  alias: '',
+  hostHeader: '',
+  access: 'public' as 'public' | 'password',
+  password: '',
+  ttlHours: 24,
+};
+
+type Dialog = { kind: 'extend' | 'revoke' | 'access'; preview: Preview } | null;
 
 async function copyText(text: string): Promise<boolean> {
   try {
@@ -62,7 +73,7 @@ export function PreviewsPage() {
   const onErr = (e: Error) => toast.show('error', e.message);
 
   const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState({ port: '', label: '', hostHeader: '', ttlHours: 24 });
+  const [form, setForm] = useState(EMPTY_FORM);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [extendHours, setExtendHours] = useState(24);
   const closeDialog = () => setDialog(null);
@@ -75,12 +86,15 @@ export function PreviewsPage() {
           port: Number(form.port),
           label: form.label.trim(),
           ttlHours: form.ttlHours,
+          access: form.access,
+          ...(form.access === 'password' ? { password: form.password } : {}),
+          ...(form.alias ? { alias: form.alias } : {}),
           ...(form.hostHeader.trim() ? { hostHeader: form.hostHeader.trim() } : {}),
         },
       }),
     onSuccess: async (p) => {
       setCreating(false);
-      setForm({ port: '', label: '', hostHeader: '', ttlHours: 24 });
+      setForm(EMPTY_FORM);
       const copied = await copyText(p.url);
       toast.show(
         'success',
@@ -88,6 +102,33 @@ export function PreviewsPage() {
           ? 'Preview dibuat dan link disalin. Pastikan aplikasimu berjalan di VM, lalu kirim link ke teman atau dosen.'
           : 'Preview dibuat. Salin link-nya dari daftar di bawah, lalu pastikan aplikasimu berjalan di VM.',
       );
+      await refresh();
+    },
+    onError: onErr,
+  });
+
+  const [accessForm, setAccessForm] = useState<{ access: 'public' | 'password'; password: string }>(
+    {
+      access: 'password',
+      password: '',
+    },
+  );
+  const changeAccess = useMutation({
+    mutationFn: (p: Preview) =>
+      api<Preview>(`${base}/${p.id}/access`, {
+        method: 'POST',
+        body: {
+          access: accessForm.access,
+          ...(accessForm.access === 'password' ? { password: accessForm.password } : {}),
+        },
+      }),
+    onSuccess: async () => {
+      toast.show(
+        'success',
+        'Pengaturan akses diperbarui. Pengunjung yang sudah masuk harus memasukkan kata sandi lagi.',
+      );
+      setAccessForm({ access: 'password', password: '' });
+      closeDialog();
       await refresh();
     },
     onError: onErr,
@@ -142,6 +183,11 @@ export function PreviewsPage() {
 
   const items = list.data?.items ?? [];
   const full = !!list.data && items.length >= list.data.maxPerVm;
+  const aliasOk =
+    form.alias === '' ||
+    (/^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$/.test(form.alias) && !form.alias.includes('--'));
+  const passwordOk = form.access === 'public' || form.password.length >= 8;
+  const accessPasswordOk = accessForm.access === 'public' || accessForm.password.length >= 8;
   const portNum = Number(form.port);
   const portValid =
     /^[0-9]{2,5}$/.test(form.port) && (portNum === 80 || (portNum >= 1024 && portNum <= 65535));
@@ -217,6 +263,14 @@ export function PreviewsPage() {
                 ) : (
                   <Badge tone="neutral">Siaga</Badge>
                 )}
+                {p.access === 'password' ? (
+                  <Badge tone="info">
+                    <Lock aria-hidden="true" className="mr-1 inline h-3 w-3" />
+                    Kata sandi
+                  </Badge>
+                ) : (
+                  <Badge tone="warning">Publik</Badge>
+                )}
               </span>
             </div>
 
@@ -269,6 +323,20 @@ export function PreviewsPage() {
               <Button
                 size="sm"
                 variant="ghost"
+                icon={<Lock className="h-4 w-4" />}
+                onClick={() => {
+                  setAccessForm({
+                    access: 'password',
+                    password: '',
+                  });
+                  setDialog({ kind: 'access', preview: p });
+                }}
+              >
+                Akses
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
                 onClick={() => {
                   setExtendHours(24);
                   setDialog({ kind: 'extend', preview: p });
@@ -313,7 +381,7 @@ export function PreviewsPage() {
             </Button>
             <Button
               loading={create.isPending}
-              disabled={!portValid}
+              disabled={!portValid || !aliasOk || !passwordOk}
               onClick={() => create.mutate()}
             >
               Buat link
@@ -337,6 +405,62 @@ export function PreviewsPage() {
             onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
             hint="Untuk membedakan preview, mis. Tugas Akhir."
           />
+          <div>
+            <Input
+              label="Alias alamat (opsional)"
+              value={form.alias}
+              maxLength={30}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  alias: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''),
+                }))
+              }
+              hint="3-30 huruf kecil, angka, atau tanda hubung. Kosongkan untuk alamat acak yang panjang dan sulit ditebak."
+            />
+            <p className="mt-1 break-all font-mono text-xs text-slate-500">
+              https://pv-{form.alias || '<acak>'}.{list.data?.baseDomain ?? 'domain-anda'}
+            </p>
+            {!aliasOk && (
+              <p role="alert" className="mt-1 text-sm text-error">
+                Alias 3-30 karakter, hanya huruf kecil, angka, dan tanda hubung (tidak di
+                awal/akhir, tidak dobel).
+              </p>
+            )}
+          </div>
+          <div>
+            <label className="text-sm font-medium text-slate-700" htmlFor="acc">
+              Siapa yang boleh membuka
+            </label>
+            <select
+              id="acc"
+              className="mt-1 h-10 w-full px-3"
+              value={form.access}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, access: e.target.value as 'public' | 'password' }))
+              }
+            >
+              <option value="public">Publik (siapa pun yang tahu alamatnya)</option>
+              <option value="password">Dengan kata sandi</option>
+            </select>
+            {form.access === 'public' && form.alias && (
+              <p role="status" className="mt-1 text-sm text-amber-700">
+                Alias mudah ditebak. Dengan akses publik, orang lain bisa menemukan preview ini.
+                Pakai kata sandi bila isinya tidak untuk umum.
+              </p>
+            )}
+          </div>
+          {form.access === 'password' && (
+            <Input
+              label="Kata sandi preview"
+              type="password"
+              autoComplete="new-password"
+              value={form.password}
+              maxLength={128}
+              onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
+              hint="Minimal 8 karakter. Bagikan ke teman atau dosen bersama link-nya; kata sandi tidak bisa dilihat lagi setelah disimpan."
+            />
+          )}
           <Input
             label="Host situs (opsional)"
             value={form.hostHeader}
@@ -400,6 +524,56 @@ export function PreviewsPage() {
             </option>
           ))}
         </select>
+      </Modal>
+
+      <Modal
+        open={dialog?.kind === 'access'}
+        title="Atur akses preview"
+        onClose={closeDialog}
+        footer={
+          <>
+            <Button variant="ghost" onClick={closeDialog}>
+              Batal
+            </Button>
+            <Button
+              loading={changeAccess.isPending}
+              disabled={!accessPasswordOk}
+              onClick={() => dialog && changeAccess.mutate(dialog.preview)}
+            >
+              Simpan
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <div>
+            <label className="text-sm font-medium text-slate-700" htmlFor="acc2">
+              Siapa yang boleh membuka
+            </label>
+            <select
+              id="acc2"
+              className="mt-1 h-10 w-full px-3"
+              value={accessForm.access}
+              onChange={(e) =>
+                setAccessForm((f) => ({ ...f, access: e.target.value as 'public' | 'password' }))
+              }
+            >
+              <option value="password">Dengan kata sandi (ganti atau atur baru)</option>
+              <option value="public">Publik (siapa pun yang tahu alamatnya)</option>
+            </select>
+          </div>
+          {accessForm.access === 'password' && (
+            <Input
+              label="Kata sandi baru"
+              type="password"
+              autoComplete="new-password"
+              value={accessForm.password}
+              maxLength={128}
+              onChange={(e) => setAccessForm((f) => ({ ...f, password: e.target.value }))}
+              hint="Minimal 8 karakter. Pengunjung yang sudah masuk akan diminta kata sandi lagi."
+            />
+          )}
+        </div>
       </Modal>
 
       <ConfirmDialog

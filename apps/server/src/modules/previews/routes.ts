@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { actor, requireActive, requireAdmin } from '../../auth/plugin.js';
+import { hashPassword } from '../../auth/passwords.js';
 import type { Ctx } from '../../context.js';
 import { AppError, forbidden, notFound } from '../../errors.js';
 import { rateLimit } from '../../ratelimit.js';
@@ -9,6 +10,7 @@ import { assertVmAccess, type VmRow } from '../../rbac/index.js';
 import { DOMAIN_RE } from '../sites/nginx.js';
 import { classifyForwardError } from '../../ssh/pool.js';
 import { sshTargetFor } from '../vms/service.js';
+import { aliasError, MAX_PREVIEW_PASSWORD, MIN_PREVIEW_PASSWORD } from './access.js';
 import {
   DEFAULT_TTL_HOURS,
   LIVE_WINDOW_MS,
@@ -24,32 +26,67 @@ const previewParams = z.object({ vmId: z.string().uuid(), previewId: z.string().
 const idParams = z.object({ previewId: z.string().uuid() });
 const ttlHours = z.number().int().min(1).max(MAX_TTL_HOURS);
 
-const createBody = z.object({
-  port: z
-    .number()
-    .int()
-    .refine(
-      isPreviewPort,
-      'Port harus 80 atau antara 1024 dan 65535 (port di bawah 1024 selain 80 dipakai layanan sistem).',
-    ),
-  /** Domain situs di Nginx VM; dikirim sebagai header Host agar Nginx memilih situs yang benar. */
-  hostHeader: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .regex(
-      DOMAIN_RE,
-      'Host situs tidak valid. Contoh: blog.contoh.com (tanpa http:// dan tanpa port).',
-    )
-    .optional(),
-  label: z
-    .string()
-    .trim()
-    .max(60)
-    .regex(/^[\p{L}\p{N} _.:/()-]*$/u, 'Label hanya boleh huruf, angka, spasi, dan . _ : / ( ) -')
-    .default(''),
-  ttlHours: ttlHours.default(DEFAULT_TTL_HOURS),
-});
+const passwordField = z
+  .string()
+  .min(MIN_PREVIEW_PASSWORD, `Kata sandi preview minimal ${MIN_PREVIEW_PASSWORD} karakter.`)
+  .max(MAX_PREVIEW_PASSWORD, `Kata sandi preview maksimal ${MAX_PREVIEW_PASSWORD} karakter.`);
+
+/** Mode akses: publik, atau dilindungi kata sandi (wajib diisi bila mode password). */
+const accessFields = {
+  access: z.enum(['public', 'password']).default('public'),
+  password: passwordField.optional(),
+};
+const needPassword = (v: { access: string; password?: string }, c: z.RefinementCtx) => {
+  if (v.access === 'password' && !v.password) {
+    c.addIssue({
+      code: 'custom',
+      path: ['password'],
+      message: 'Isi kata sandi untuk preview yang dilindungi.',
+    });
+  }
+};
+
+const createBody = z
+  .object({
+    ...accessFields,
+    /** Alias alamat: pv-<alias>.<domain>. Kosong = alamat acak panjang. */
+    alias: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .superRefine((v, c) => {
+        const msg = aliasError(v);
+        if (msg) c.addIssue({ code: 'custom', message: msg });
+      })
+      .optional(),
+    port: z
+      .number()
+      .int()
+      .refine(
+        isPreviewPort,
+        'Port harus 80 atau antara 1024 dan 65535 (port di bawah 1024 selain 80 dipakai layanan sistem).',
+      ),
+    /** Domain situs di Nginx VM; dikirim sebagai header Host agar Nginx memilih situs yang benar. */
+    hostHeader: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .regex(
+        DOMAIN_RE,
+        'Host situs tidak valid. Contoh: blog.contoh.com (tanpa http:// dan tanpa port).',
+      )
+      .optional(),
+    label: z
+      .string()
+      .trim()
+      .max(60)
+      .regex(/^[\p{L}\p{N} _.:/()-]*$/u, 'Label hanya boleh huruf, angka, spasi, dan . _ : / ( ) -')
+      .default(''),
+    ttlHours: ttlHours.default(DEFAULT_TTL_HOURS),
+  })
+  .superRefine(needPassword);
+
+const accessBody = z.object(accessFields).superRefine(needPassword);
 
 export function previewRoutes(app: FastifyInstance, ctx: Ctx): void {
   const { db, audit, previews } = ctx;
@@ -60,6 +97,7 @@ export function previewRoutes(app: FastifyInstance, ctx: Ctx): void {
     port: p.port,
     label: p.label,
     hostHeader: p.host_header,
+    access: p.access,
     url: previews.urlFor(p.subdomain),
     createdAt: p.created_at,
     expiresAt: p.expires_at,
@@ -101,6 +139,7 @@ export function previewRoutes(app: FastifyInstance, ctx: Ctx): void {
       enabled: true,
       maxPerVm: MAX_PREVIEWS_PER_VM,
       maxTtlHours: MAX_TTL_HOURS,
+      baseDomain: ctx.env.PREVIEW_BASE_DOMAIN ?? null,
       items: rows.map(toPublic),
     };
   });
@@ -144,20 +183,38 @@ export function previewRoutes(app: FastifyInstance, ctx: Ctx): void {
           `Batas ${MAX_PREVIEWS_PER_VM} preview aktif per VM sudah tercapai. Cabut salah satu lalu coba lagi.`,
         );
       }
+      const subdomain = body.alias ? `pv-${body.alias}` : newSubdomain();
+      if (db.prepare('SELECT 1 AS ok FROM previews WHERE subdomain = ?').get(subdomain)) {
+        throw new AppError(
+          409,
+          'alias_taken',
+          'Alias itu sudah dipakai preview lain. Pilih alias berbeda, atau kosongkan untuk alamat acak.',
+        );
+      }
+      const passwordHash =
+        body.access === 'password' ? await hashPassword(body.password as string) : null;
       const id = randomUUID();
-      db.prepare(
-        'INSERT INTO previews (id, vm_id, user_id, subdomain, port, label, host_header, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      ).run(
-        id,
-        vm.id,
-        user.id,
-        newSubdomain(),
-        body.port,
-        body.label,
-        body.hostHeader ?? null,
-        now,
-        now + body.ttlHours * 3_600_000,
-      );
+      try {
+        db.prepare(
+          'INSERT INTO previews (id, vm_id, user_id, subdomain, port, label, host_header, access, password_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        ).run(
+          id,
+          vm.id,
+          user.id,
+          subdomain,
+          body.port,
+          body.label,
+          body.hostHeader ?? null,
+          body.access,
+          passwordHash,
+          now,
+          now + body.ttlHours * 3_600_000,
+        );
+      } catch (e) {
+        if (String(e).includes('UNIQUE'))
+          throw new AppError(409, 'alias_taken', 'Alias itu baru saja dipakai. Pilih alias lain.');
+        throw e;
+      }
       // Subdomain adalah kunci akses: tidak dicatat di audit log.
       audit.record({
         userId: user.id,
@@ -166,10 +223,36 @@ export function previewRoutes(app: FastifyInstance, ctx: Ctx): void {
         action: 'preview.create',
         target: `port:${body.port}`,
         result: 'ok',
-        meta: { hours: body.ttlHours },
+        meta: { hours: body.ttlHours, access: body.access, customAlias: !!body.alias },
       });
       reply.code(201);
       return toPublic(load(vm, id));
+    },
+  );
+
+  /** Ubah mode akses atau ganti kata sandi. Cookie akses lama langsung tidak berlaku (versi dinaikkan). */
+  app.post(
+    '/api/vms/:vmId/previews/:previewId/access',
+    { onRequest: requireActive, config: rateLimit(20) },
+    async (req) => {
+      const vm = access(req);
+      const { previewId } = previewParams.parse(req.params);
+      const body = accessBody.parse(req.body);
+      load(vm, previewId);
+      const hash = body.access === 'password' ? await hashPassword(body.password as string) : null;
+      db.prepare(
+        'UPDATE previews SET access = ?, password_hash = ?, access_version = access_version + 1 WHERE id = ?',
+      ).run(body.access, hash, previewId);
+      audit.record({
+        userId: actor(req).id,
+        vmId: vm.id,
+        ip: req.ip,
+        action: 'preview.access',
+        target: previewId,
+        result: 'ok',
+        meta: { access: body.access },
+      });
+      return toPublic(load(vm, previewId));
     },
   );
 

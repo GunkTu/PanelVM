@@ -102,6 +102,15 @@ export function AdminPreviewsPage() {
                 ),
             },
             {
+              header: 'Akses',
+              render: (p) =>
+                p.access === 'password' ? (
+                  <Badge tone="info">Kata sandi</Badge>
+                ) : (
+                  <Badge tone="warning">Publik</Badge>
+                ),
+            },
+            {
               header: 'Akses terakhir',
               render: (p) => (p.lastAccessAt ? formatTime(p.lastAccessAt) : 'Belum ada'),
             },

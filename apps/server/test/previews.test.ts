@@ -94,6 +94,7 @@ beforeAll(async () => {
           xfProto: req.headers['x-forwarded-proto'],
           xfHost: req.headers['x-forwarded-host'],
           origin: req.headers.origin ?? null,
+          cookie: req.headers.cookie ?? null,
           body,
         }),
       );
@@ -351,7 +352,7 @@ describe('proxy HTTP dan WebSocket', () => {
     expect(res.body).not.toMatch(/vm-a|127\.0\.0\.1|stack|Error:/);
     expect(res.headers['x-robots-tag']).toMatch(/noindex/);
     // host dengan label salah format diperlakukan sebagai host panel biasa
-    expect((await raw(`pv-pendek.${BASE}`, '/api/health')).status).toBe(200);
+    expect((await raw(`pv-ab.${BASE}`, '/api/health')).status).toBe(200);
   });
 
   it('WebSocket (mis. HMR Vite) diteruskan dua arah', async () => {
@@ -587,5 +588,265 @@ describe('port 80 dan header Host situs', () => {
     expect(pv.hostHeader).toBeNull();
     expect(JSON.parse((await raw(hostOf(pv.url), '/')).body).host).toBe(`localhost:${appPort}`);
     await call(app, b, 'DELETE', `/api/vms/${vmB}/previews/${pv.id}`);
+  });
+});
+
+describe('alias alamat dan akses kata sandi', () => {
+  const PW = 'sandi-rahasia-123';
+  const form = (fields: Record<string, string>) => new URLSearchParams(fields).toString();
+  const FORM_HEADERS = { 'content-type': 'application/x-www-form-urlencoded' };
+  const del = (id: string) => call(app, b, 'DELETE', `/api/vms/${vmB}/previews/${id}`);
+
+  const loginForm = (host: string, password: string, extra: Record<string, string> = {}) =>
+    raw(host, '/__pv/login', {
+      method: 'POST',
+      body: form({ password, next: '/dashboard?x=1' }),
+      headers: { ...FORM_HEADERS, origin: `https://${host}`, ...extra },
+    });
+  const cookieOf = (res: { headers: http.IncomingHttpHeaders }) =>
+    String(res.headers['set-cookie']?.[0] ?? '').split(';')[0]!;
+
+  it('alias murni: alamat pv-<alias>, huruf besar dinormalisasi, dan bisa dipakai langsung', async () => {
+    const r = await createPreview(b, vmB, { port: appPort, alias: 'Tugas-Akhir' });
+    expect(r.statusCode).toBe(201);
+    const pv = r.json() as PreviewDto & { access: string };
+    expect(pv.url).toBe(`https://pv-tugas-akhir.${BASE}`);
+    expect(pv.access).toBe('public');
+    const res = await raw(hostOf(pv.url), '/hai');
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body).url).toBe('/hai');
+    await del(pv.id);
+  });
+
+  it('alias tidak valid atau dicadangkan ditolak dengan pesan yang jelas', async () => {
+    const bad = [
+      'ab',
+      'a--b',
+      '-abc',
+      'abc-',
+      'ada spasi',
+      'a_b',
+      'x'.repeat(31),
+      'admin',
+      'login',
+      'www',
+    ];
+    for (const alias of bad) {
+      const res = await createPreview(b, vmB, { port: appPort, alias });
+      expect(res.statusCode, alias).toBe(400);
+      expect(res.json().message, alias).toMatch(/Alias|dicadangkan/);
+    }
+  });
+
+  it('alias yang sama ditolak (409), bebas lagi setelah dicabut', async () => {
+    const first = await createPreview(b, vmB, { port: appPort, alias: 'demo-bersama' });
+    expect(first.statusCode).toBe(201);
+    const dupe = await createPreview(a, vmA, { port: closedPort + 9, alias: 'demo-bersama' });
+    expect(dupe.statusCode).toBe(409);
+    expect(dupe.json().error).toBe('alias_taken');
+    await del((first.json() as PreviewDto).id);
+    const again = await createPreview(a, vmA, { port: closedPort + 9, alias: 'demo-bersama' });
+    expect(again.statusCode).toBe(201);
+    await call(app, a, 'DELETE', `/api/vms/${vmA}/previews/${(again.json() as PreviewDto).id}`);
+  });
+
+  it('mode kata sandi: wajib diisi dan minimal 8 karakter', async () => {
+    const none = await createPreview(b, vmB, { port: appPort, access: 'password' });
+    expect(none.statusCode).toBe(400);
+    expect(none.json().message).toMatch(/kata sandi/i);
+    const short = await createPreview(b, vmB, {
+      port: appPort,
+      access: 'password',
+      password: 'pendek',
+    });
+    expect(short.statusCode).toBe(400);
+    expect(short.json().message).toMatch(/minimal 8/);
+  });
+
+  describe('gerbang kata sandi', () => {
+    let pv: PreviewDto & { access: string };
+    let host: string;
+
+    beforeAll(async () => {
+      const r = await createPreview(b, vmB, {
+        port: appPort,
+        alias: 'dosen-uji',
+        access: 'password',
+        password: PW,
+      });
+      expect(r.statusCode).toBe(201);
+      pv = r.json() as typeof pv;
+      host = hostOf(pv.url);
+    });
+    afterAll(async () => {
+      await del(pv.id);
+    });
+
+    it('tanpa kata sandi: halaman login (browser) atau 401 polos, aplikasi tidak tersentuh', async () => {
+      const page = await raw(host, '/', { headers: { accept: 'text/html' } });
+      expect(page.status).toBe(401);
+      expect(page.body).toMatch(/Preview dilindungi/);
+      expect(page.body).toMatch(/type="password"/);
+      expect(page.headers['x-robots-tag']).toMatch(/noindex/);
+      expect(page.headers['set-cookie']).toBeUndefined();
+
+      const api = await raw(host, '/data.json', { headers: { accept: 'application/json' } });
+      expect(api.status).toBe(401);
+      expect(api.headers['x-app']).toBeUndefined();
+      const post = await raw(host, '/kirim', { method: 'POST', body: 'x' });
+      expect(post.status).toBe(401);
+      expect(post.headers['x-app']).toBeUndefined();
+    });
+
+    it('WebSocket tanpa cookie ditolak 401', async () => {
+      const ws = new WebSocket(`ws://127.0.0.1:${panelPort}/hmr`, { headers: { host } });
+      const status = await new Promise<number>((resolve, reject) => {
+        ws.on('unexpected-response', (_req, res) => resolve(res.statusCode ?? 0));
+        ws.on('open', () => reject(new Error('seharusnya ditolak')));
+        ws.on('error', () => undefined);
+        setTimeout(() => reject(new Error('timeout')), 5000);
+      });
+      expect(status).toBe(401);
+    });
+
+    it('kata sandi salah -> 401 tanpa cookie; benar -> 303, cookie HttpOnly, redirect ke path aman', async () => {
+      const bad = await loginForm(host, 'salah-semua');
+      expect(bad.status).toBe(401);
+      expect(bad.body).toMatch(/Kata sandi salah/);
+      expect(bad.headers['set-cookie']).toBeUndefined();
+
+      const ok = await loginForm(host, PW);
+      expect(ok.status).toBe(303);
+      expect(ok.headers.location).toBe('/dashboard?x=1');
+      const setCookie = String(ok.headers['set-cookie']?.[0]);
+      expect(setCookie).toMatch(/^pv_access=/);
+      expect(setCookie).toMatch(/HttpOnly/);
+      expect(setCookie).toMatch(/SameSite=Lax/);
+      expect(setCookie).not.toContain(PW);
+    });
+
+    it('dengan cookie: HTTP dan WebSocket diteruskan; cookie akses tidak bocor ke aplikasi', async () => {
+      const cookie = cookieOf(await loginForm(host, PW));
+      const res = await raw(host, '/halaman', {
+        headers: { cookie: `${cookie}; tema=gelap`, accept: 'text/html' },
+      });
+      expect(res.status).toBe(200);
+      expect(res.headers['x-app']).toBe('yes');
+      const seen = JSON.parse(res.body).cookie as string;
+      expect(seen).toBe('tema=gelap');
+      expect(seen).not.toContain('pv_access');
+
+      const ws = new WebSocket(`ws://127.0.0.1:${panelPort}/hmr`, { headers: { host, cookie } });
+      const msg = await new Promise<string>((resolve, reject) => {
+        ws.on('open', () => ws.send('rahasia'));
+        ws.on('message', (m) => resolve(m.toString()));
+        ws.on('error', reject);
+        setTimeout(() => reject(new Error('timeout')), 5000);
+      });
+      expect(msg).toBe('echo:rahasia');
+      ws.close();
+    });
+
+    it('open redirect dicegah dan form dari origin lain ditolak', async () => {
+      const evil = await raw(host, '/__pv/login', {
+        method: 'POST',
+        body: form({ password: PW, next: '//evil.example/x' }),
+        headers: { ...FORM_HEADERS, origin: `https://${host}` },
+      });
+      expect(evil.status).toBe(303);
+      expect(evil.headers.location).toBe('/');
+
+      const cross = await loginForm(host, PW, { origin: 'https://evil.example' });
+      expect(cross.status).toBe(403);
+      expect(cross.headers['set-cookie']).toBeUndefined();
+    });
+
+    it('cookie terikat ke satu preview: tidak berlaku di preview lain', async () => {
+      const cookie = cookieOf(await loginForm(host, PW));
+      const other = await createPreview(b, vmB, {
+        port: closedPort + 11,
+        access: 'password',
+        password: 'sandi-lain-456',
+      });
+      const otherDto = other.json() as PreviewDto;
+      const res = await raw(hostOf(otherDto.url), '/', {
+        headers: { cookie, accept: 'text/html' },
+      });
+      expect(res.status).toBe(401);
+      await del(otherDto.id);
+    });
+
+    it('mengganti kata sandi mematikan cookie lama; mode publik membuka gerbang; bisa dikunci lagi', async () => {
+      const cookie = cookieOf(await loginForm(host, PW));
+      expect((await raw(host, '/', { headers: { cookie } })).status).toBe(200);
+
+      const change = await call(app, b, 'POST', `/api/vms/${vmB}/previews/${pv.id}/access`, {
+        access: 'password',
+        password: 'sandi-baru-789',
+      });
+      expect(change.statusCode).toBe(200);
+      expect(JSON.stringify(change.json())).not.toMatch(/sandi-baru|argon2|password_hash/);
+      expect((await raw(host, '/', { headers: { cookie } })).status).toBe(401);
+      expect((await loginForm(host, PW)).status).toBe(401); // sandi lama tidak berlaku
+      const fresh = cookieOf(await loginForm(host, 'sandi-baru-789'));
+      expect((await raw(host, '/', { headers: { cookie: fresh } })).status).toBe(200);
+
+      await call(app, b, 'POST', `/api/vms/${vmB}/previews/${pv.id}/access`, { access: 'public' });
+      expect((await raw(host, '/')).status).toBe(200);
+
+      await call(app, b, 'POST', `/api/vms/${vmB}/previews/${pv.id}/access`, {
+        access: 'password',
+        password: PW,
+      });
+      expect((await raw(host, '/', { headers: { accept: 'text/html' } })).status).toBe(401);
+      expect((await raw(host, '/', { headers: { cookie: fresh } })).status).toBe(401);
+    });
+
+    it('client lain tidak bisa mengubah akses preview ini (404), tanpa login 401', async () => {
+      const url = `/api/vms/${vmB}/previews/${pv.id}/access`;
+      expect((await call(app, a, 'POST', url, { access: 'public' })).statusCode).toBe(404);
+      expect((await call(app, null, 'POST', url, { access: 'public' })).statusCode).toBe(401);
+      expect((await raw(host, '/', { headers: { accept: 'text/html' } })).status).toBe(401);
+    });
+
+    it('kata sandi dan hash tidak pernah muncul di respons API, audit, atau notifikasi', async () => {
+      const list = await call(app, b, 'GET', `/api/vms/${vmB}/previews`);
+      const adminList = await call(app, admin, 'GET', '/api/admin/previews');
+      for (const body of [list.body, adminList.body]) {
+        expect(body).not.toMatch(/argon2|password_hash|sandi-rahasia|sandi-baru|sandi-lain/);
+      }
+      const dump = JSON.stringify([
+        ctx.db.prepare('SELECT * FROM audit_logs').all(),
+        ctx.db.prepare('SELECT * FROM notifications').all(),
+      ]);
+      expect(dump).not.toMatch(/sandi-rahasia|sandi-baru|sandi-lain|argon2/);
+      const item = adminList.json().items.find((p: { id: string }) => p.id === pv.id);
+      expect(item.access).toBe('password');
+    });
+  });
+
+  it('batas percobaan kata sandi: setelah 8 percobaan per IP, sandi benar pun ditolak (429)', async () => {
+    const r = await createPreview(b, vmB, { port: appPort, access: 'password', password: PW });
+    const dto = r.json() as PreviewDto;
+    const host = hostOf(dto.url);
+    const results: number[] = [];
+    for (let i = 0; i < 8; i++) results.push((await loginForm(host, `tebakan-${i}`)).status);
+    expect(results.every((s) => s === 401)).toBe(true);
+    const locked = await loginForm(host, PW);
+    expect(locked.status).toBe(429);
+    expect(locked.headers['set-cookie']).toBeUndefined();
+    await del(dto.id);
+  });
+});
+
+describe('batas tebakan alias', () => {
+  it('IP yang terus membuka alamat preview tak dikenal akhirnya diperlambat (429)', async () => {
+    let limited = 0;
+    for (let i = 0; i < 60 && !limited; i++) {
+      const res = await raw(`pv-tidak-ada-${i}.${BASE}`, '/');
+      if (res.status === 429) limited = i;
+      else expect(res.status).toBe(404);
+    }
+    expect(limited).toBeGreaterThan(0);
   });
 });
