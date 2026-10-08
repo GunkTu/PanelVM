@@ -81,6 +81,7 @@ const run = (ssh: SshClient, argv: string[], opts: Pick<ExecOptions, 'sudo'>, ti
 
 const FIXED_PACKAGES = [
   'nginx',
+  'apache2',
   'unzip',
   'zip',
   'curl',
@@ -111,6 +112,7 @@ export async function collectStatus(
           'apt-cache',
           'policy',
           'nginx',
+          'apache2',
           'mariadb-server',
           'mysql-server',
           'redis-server',
@@ -207,7 +209,24 @@ export async function collectStatus(
         installed.has('nginx'),
         installed.get('nginx') ?? null,
         cand.get('nginx') ?? null,
-        { available: cand.get('nginx') != null || installed.has('nginx') },
+        {
+          available: cand.get('nginx') != null || installed.has('nginx'),
+          conflict: installed.has('apache2')
+            ? 'Apache sudah terpasang. Nginx dan Apache tidak bisa dipasang bersamaan; pilih salah satu.'
+            : undefined,
+        },
+      ),
+      row(
+        'apache',
+        installed.has('apache2'),
+        installed.get('apache2') ?? null,
+        cand.get('apache2') ?? null,
+        {
+          available: cand.get('apache2') != null || installed.has('apache2'),
+          conflict: installed.has('nginx')
+            ? 'Nginx sudah terpasang. Apache dan Nginx tidak bisa dipasang bersamaan; pilih salah satu.'
+            : undefined,
+        },
       ),
       row('composer', composerVersion !== null, composerVersion, null),
       row(

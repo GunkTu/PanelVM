@@ -5,6 +5,7 @@
 export type ItemId =
   | 'base-tools'
   | 'nginx'
+  | 'apache'
   | 'php-repo'
   | 'php'
   | 'composer'
@@ -32,9 +33,18 @@ export const CATALOG: Record<ItemId, CatalogItem> = {
   nginx: {
     id: 'nginx',
     title: 'Nginx',
-    description: 'Web server untuk situs web di VM ini.',
+    description:
+      'Web server untuk situs web di VM ini. Pilih salah satu: Nginx atau Apache tidak bisa terpasang bersamaan.',
     packages: ['nginx'],
     service: 'nginx',
+  },
+  apache: {
+    id: 'apache',
+    title: 'Apache',
+    description:
+      'Web server alternatif untuk situs web di VM ini. Pilih salah satu: Apache atau Nginx tidak bisa terpasang bersamaan.',
+    packages: ['apache2'],
+    service: 'apache2',
   },
   'php-repo': {
     id: 'php-repo',

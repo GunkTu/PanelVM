@@ -23,16 +23,24 @@ import {
   type ArtisanCommand,
   type DeployOptions,
 } from './deploy.js';
+import { APACHE_MODULES } from './apache.js';
 import {
-  confAvailable,
-  confEnabled,
+  defaultDocRootRel,
+  DOC_ROOT_RE,
   DOMAIN_RE,
   docRoot,
-  nginxConf,
   phpSocket,
   siteRoot,
   type SiteKind,
 } from './nginx.js';
+import { WEB_SERVERS, type WebServer } from './webserver.js';
+import { findDirsArgv, parseDirListing, suggestDocRoot } from './docroot.js';
+import {
+  archiveKindOrThrow,
+  DETECT_SCRIPT,
+  DOWNLOAD_SCRIPT,
+  normalizeDownloadUrl,
+} from './download.js';
 
 interface SiteRow {
   id: string;
@@ -41,6 +49,9 @@ interface SiteRow {
   kind: SiteKind;
   php_version: string | null;
   root_path: string;
+  web_server: WebServer;
+  /** NULL = bawaan menurut jenis situs; "." = folder utama; selain itu subfolder relatif. */
+  doc_root: string | null;
   created_at: number;
 }
 
@@ -52,15 +63,19 @@ const domain = z
   .trim()
   .toLowerCase()
   .regex(DOMAIN_RE, 'Domain tidak valid. Contoh: blog.contoh.com (huruf kecil, tanpa http://).');
-const RELOAD = ['sh', '-c', 'systemctl reload nginx 2>/dev/null || nginx -s reload'];
+const webServerField = z.enum(['nginx', 'apache']);
 
 const toPublic = (s: SiteRow) => ({
   id: s.id,
   domain: s.domain,
   kind: s.kind,
   phpVersion: s.php_version,
+  webServer: s.web_server,
   rootPath: s.root_path,
-  docRoot: docRoot(s.domain, s.kind),
+  docRoot: docRoot(s.domain, s.kind, s.doc_root),
+  /** Folder dokumen relatif ("." = folder utama) dan apakah masih mengikuti bawaan jenis situs. */
+  docRootRel: s.doc_root ?? defaultDocRootRel(s.kind),
+  docRootAuto: s.doc_root === null,
   envPath: s.kind === 'laravel' ? `${s.root_path}/.env` : null,
   createdAt: s.created_at,
 });
@@ -122,35 +137,45 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
     return r;
   };
 
-  /** Tulis konfigurasi, aktifkan, uji dengan nginx -t, dan rollback bila ditolak. */
-  async function applyNginx(
+  /** Konfigurasi situs yang sedang berlaku (untuk rollback saat konfigurasi baru ditolak). */
+  const confOf = (s: SiteRow): string =>
+    WEB_SERVERS[s.web_server].conf(s.domain, s.kind, s.php_version, s.doc_root);
+
+  /**
+   * Tulis konfigurasi, aktifkan, uji sintaks (nginx -t / apache2ctl configtest), dan rollback bila ditolak.
+   * Untuk Apache, modul yang dibutuhkan (rewrite, proxy_fcgi, dst.) diaktifkan lebih dulu.
+   */
+  async function applyWebServer(
     vm: VmRow,
     lease: Lease,
-    s: { domain: string; kind: SiteKind; phpVersion: string | null },
+    server: WebServer,
+    s: { domain: string; kind: SiteKind; phpVersion: string | null; docRoot: string | null },
     previous?: string,
   ): Promise<void> {
-    await must(vm, lease, ['tee', confAvailable(s.domain)], 'Menulis konfigurasi nginx', {
-      stdin: nginxConf(s.domain, s.kind, s.phpVersion),
+    const ws = WEB_SERVERS[server];
+    if (server === 'apache')
+      await must(vm, lease, ['a2enmod', '-q', ...APACHE_MODULES], 'Mengaktifkan modul Apache');
+    await must(vm, lease, ['tee', ws.available(s.domain)], `Menulis konfigurasi ${ws.title}`, {
+      stdin: ws.conf(s.domain, s.kind, s.phpVersion, s.docRoot),
     });
     await must(
       vm,
       lease,
-      ['ln', '-sf', confAvailable(s.domain), confEnabled(s.domain)],
+      ['ln', '-sf', ws.available(s.domain), ws.enabled(s.domain)],
       'Mengaktifkan situs',
     );
-    const test = await exec(vm, lease, ['nginx', '-t']);
+    const test = await exec(vm, lease, ws.test);
     if (test.code !== 0) {
       if (previous !== undefined)
-        await exec(vm, lease, ['tee', confAvailable(s.domain)], { stdin: previous });
-      else
-        await exec(vm, lease, ['rm', '-f', '--', confEnabled(s.domain), confAvailable(s.domain)]);
+        await exec(vm, lease, ['tee', ws.available(s.domain)], { stdin: previous });
+      else await exec(vm, lease, ['rm', '-f', '--', ws.enabled(s.domain), ws.available(s.domain)]);
       throw new AppError(
         422,
-        'nginx_rejected',
-        `Nginx menolak konfigurasi: ${test.stderr.trim().slice(0, 400)}`,
+        'webserver_rejected',
+        `${ws.title} menolak konfigurasi: ${`${test.stderr}${test.stdout}`.trim().slice(0, 400)}`,
       );
     }
-    await must(vm, lease, RELOAD, 'Memuat ulang nginx');
+    await must(vm, lease, ws.reload, `Memuat ulang ${ws.title}`);
   }
 
   app.get('/api/vms/:vmId/sites', { onRequest: requireActive }, async (req) => {
@@ -161,12 +186,13 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { items: rows.map(toPublic) };
   });
 
-  /** Prasyarat untuk membuat situs: nginx dan versi PHP yang terpasang. */
+  /** Prasyarat untuk membuat situs: web server (Nginx atau Apache) dan versi PHP yang terpasang. */
   app.get('/api/vms/:vmId/sites/options', { onRequest: requireActive }, async (req) => {
     const { vm } = access(req);
     return withVm(ctx, vm, async (lease) => {
-      const [ng, php, comp] = await Promise.all([
-        exec(vm, lease, ['sh', '-c', 'command -v nginx']),
+      const [ng, ap, php, comp] = await Promise.all([
+        exec(vm, lease, WEB_SERVERS.nginx.detect),
+        exec(vm, lease, WEB_SERVERS.apache.detect),
         exec(vm, lease, [
           'dpkg-query',
           '-W',
@@ -178,8 +204,13 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
       const versions = [...parseDpkg(php.stdout).keys()]
         .map((p) => /^php(\d+\.\d+)-fpm$/.exec(p)?.[1])
         .filter((v): v is string => !!v);
+      const nginx = ng.code === 0;
+      const apache = ap.code === 0;
       return {
-        nginx: ng.code === 0,
+        nginx,
+        apache,
+        /** Web server yang dipakai situs baru; null bila belum ada, "both" bila keduanya ada (harus memilih). */
+        webServer: nginx && apache ? 'both' : nginx ? 'nginx' : apache ? 'apache' : null,
         composer: comp.code === 0,
         phpVersions: versions.sort().reverse(),
       };
@@ -193,6 +224,8 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
         domain,
         kind: z.enum(['laravel', 'php', 'static']),
         phpVersion: phpVersion.optional(),
+        /** Wajib hanya bila VM punya Nginx dan Apache sekaligus (terpasang di luar panel). */
+        webServer: webServerField.optional(),
       })
       .parse(req.body);
     if (b.kind !== 'static' && !b.phpVersion)
@@ -207,12 +240,37 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
     const phpV = b.kind === 'static' ? null : b.phpVersion!;
     const root = siteRoot(b.domain);
 
+    let server: WebServer = 'nginx';
     await withVm(ctx, vm, async (lease) => {
-      if ((await exec(vm, lease, ['sh', '-c', 'command -v nginx'])).code !== 0) {
+      const [hasNginx, hasApache] = await Promise.all([
+        exec(vm, lease, WEB_SERVERS.nginx.detect).then((r) => r.code === 0),
+        exec(vm, lease, WEB_SERVERS.apache.detect).then((r) => r.code === 0),
+      ]);
+      const installed = ([hasNginx && 'nginx', hasApache && 'apache'] as const).filter(
+        (x): x is WebServer => !!x,
+      );
+      if (installed.length === 0) {
         throw new AppError(
           409,
-          'nginx_missing',
-          'Nginx belum terpasang di VM. Pasang lewat menu Aplikasi terlebih dulu.',
+          'webserver_missing',
+          'Belum ada web server di VM. Pasang Nginx atau Apache (pilih salah satu) lewat menu Aplikasi terlebih dulu.',
+        );
+      }
+      if (b.webServer) {
+        if (!installed.includes(b.webServer))
+          throw new AppError(
+            409,
+            'webserver_not_installed',
+            `${WEB_SERVERS[b.webServer].title} belum terpasang di VM ini. Pasang lewat menu Aplikasi atau pilih web server yang sudah ada.`,
+          );
+        server = b.webServer;
+      } else if (installed.length === 1) {
+        server = installed[0]!;
+      } else {
+        throw new AppError(
+          400,
+          'webserver_choice',
+          'VM ini punya Nginx dan Apache sekaligus. Pilih web server mana yang dipakai untuk situs ini.',
         );
       }
       if (phpV && (await exec(vm, lease, ['test', '-S', phpSocket(phpV)])).code !== 0) {
@@ -223,11 +281,11 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
         );
       }
       const sftp = new Sftp(await lease.sftp());
-      if (await sftp.exists(confAvailable(b.domain)).catch(() => false)) {
+      if (await sftp.exists(WEB_SERVERS[server].available(b.domain)).catch(() => false)) {
         throw new AppError(
           409,
           'conf_exists',
-          `Sudah ada konfigurasi nginx untuk ${b.domain} di VM (bukan dari panel). Hapus atau ganti nama dulu lewat File Manager.`,
+          `Sudah ada konfigurasi ${WEB_SERVERS[server].title} untuk ${b.domain} di VM (bukan dari panel). Hapus atau ganti nama dulu lewat File Manager.`,
         );
       }
       await must(
@@ -261,14 +319,19 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
         );
       }
       await exec(vm, lease, ['chown', '-R', 'www-data:www-data', '--', root]);
-      await applyNginx(vm, lease, { domain: b.domain, kind: b.kind, phpVersion: phpV });
+      await applyWebServer(vm, lease, server, {
+        domain: b.domain,
+        kind: b.kind,
+        phpVersion: phpV,
+        docRoot: null,
+      });
     });
 
     const id = randomUUID();
     db.prepare(
-      'INSERT INTO sites (id, vm_id, domain, kind, php_version, root_path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    ).run(id, vm.id, b.domain, b.kind, phpV, root, Date.now());
-    rec(req, vm, userId, 'create', b.domain, 'ok', { kind: b.kind, php: phpV });
+      'INSERT INTO sites (id, vm_id, domain, kind, php_version, root_path, web_server, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run(id, vm.id, b.domain, b.kind, phpV, root, server, Date.now());
+    rec(req, vm, userId, 'create', b.domain, 'ok', { kind: b.kind, php: phpV, server });
     reply.code(201);
     return toPublic(loadSite(vm, id));
   });
@@ -288,17 +351,75 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
           `PHP ${v} (FPM) belum terpasang atau belum berjalan di VM. Pasang lewat menu Aplikasi.`,
         );
       }
-      await applyNginx(
+      await applyWebServer(
         vm,
         lease,
-        { domain: site.domain, kind: site.kind, phpVersion: v },
-        nginxConf(site.domain, site.kind, site.php_version),
+        site.web_server,
+        { domain: site.domain, kind: site.kind, phpVersion: v, docRoot: site.doc_root },
+        confOf(site),
       );
     });
     db.prepare('UPDATE sites SET php_version = ? WHERE id = ?').run(v, site.id);
     rec(req, vm, userId, 'php_change', site.domain, 'ok', { from: site.php_version, to: v });
     return toPublic(loadSite(vm, site.id));
   });
+
+  /** Daftar folder di dalam situs (dan mana yang berisi index) untuk memilih folder dokumen. */
+  app.get('/api/vms/:vmId/sites/:siteId/dirs', { onRequest: requireActive }, async (req) => {
+    const { vm } = access(req);
+    const { siteId } = siteParams.parse(req.params);
+    const site = loadSite(vm, siteId);
+    const r = await withVm(ctx, vm, (lease) =>
+      exec(vm, lease, findDirsArgv(siteRoot(site.domain)), { timeoutMs: 30_000 }),
+    );
+    const entries = parseDirListing(r.stdout);
+    return {
+      current: site.doc_root ?? defaultDocRootRel(site.kind),
+      auto: site.doc_root === null,
+      defaultPath: defaultDocRootRel(site.kind),
+      suggested: suggestDocRoot(site.kind, entries),
+      entries,
+    };
+  });
+
+  /** Pilih folder dokumen (null = kembali ke bawaan menurut jenis situs). Konfigurasi diuji dan di-rollback bila ditolak. */
+  app.post(
+    '/api/vms/:vmId/sites/:siteId/docroot',
+    { config: rateLimit(30), onRequest: requireActive },
+    async (req) => {
+      const { vm, userId } = access(req);
+      const { siteId } = siteParams.parse(req.params);
+      const site = loadSite(vm, siteId);
+      const { path } = z
+        .object({
+          path: z
+            .string()
+            .regex(DOC_ROOT_RE, 'Folder tidak valid. Pilih dari daftar folder situs.')
+            .nullable(),
+        })
+        .parse(req.body);
+      await withVm(ctx, vm, async (lease) => {
+        const target = docRoot(site.domain, site.kind, path);
+        if ((await exec(vm, lease, ['test', '-d', target])).code !== 0) {
+          throw new AppError(
+            409,
+            'docroot_missing',
+            'Folder itu belum ada di VM. Deploy kode dulu atau pilih folder lain dari daftar.',
+          );
+        }
+        await applyWebServer(
+          vm,
+          lease,
+          site.web_server,
+          { domain: site.domain, kind: site.kind, phpVersion: site.php_version, docRoot: path },
+          confOf(site),
+        );
+      });
+      db.prepare('UPDATE sites SET doc_root = ? WHERE id = ?').run(path, site.id);
+      rec(req, vm, userId, 'docroot', site.domain, 'ok', { from: site.doc_root, to: path });
+      return toPublic(loadSite(vm, site.id));
+    },
+  );
 
   app.post('/api/vms/:vmId/sites/:siteId/delete', { onRequest: requireActive }, async (req) => {
     const { vm, userId } = access(req);
@@ -314,14 +435,15 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
         'Konfirmasi tidak cocok. Ketik domain situs persis untuk menghapus.',
       );
     await withVm(ctx, vm, async (lease) => {
+      const ws = WEB_SERVERS[site.web_server];
       await must(
         vm,
         lease,
-        ['rm', '-f', '--', confEnabled(site.domain), confAvailable(site.domain)],
-        'Menghapus konfigurasi nginx',
+        ['rm', '-f', '--', ws.enabled(site.domain), ws.available(site.domain)],
+        `Menghapus konfigurasi ${ws.title}`,
       );
-      const test = await exec(vm, lease, ['nginx', '-t']);
-      if (test.code === 0) await exec(vm, lease, RELOAD);
+      const test = await exec(vm, lease, ws.test);
+      if (test.code === 0) await exec(vm, lease, ws.reload);
       // Path dibangun ulang dari domain tervalidasi, bukan dari nilai tersimpan.
       if (b.deleteFiles && DOMAIN_RE.test(site.domain))
         await must(vm, lease, ['rm', '-rf', '--', siteRoot(site.domain)], 'Menghapus file situs', {
@@ -372,6 +494,47 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
     migrate: q.migrate === 'true',
     optimize: q.optimize === 'true',
   });
+
+  /**
+   * Setelah deploy: bila folder dokumen masih mengikuti bawaan dan bawaan itu tidak berisi index, cari folder yang
+   * berisi index (mis. dist/, public_html/). Satu kandidat (atau satu nama umum) dipakai otomatis; selain itu
+   * pengguna diberi tahu untuk memilih dari daftar folder di halaman Situs Web.
+   */
+  async function autoDocRoot(
+    vm: VmRow,
+    site: SiteRow,
+    lease: Lease,
+    log: (t: string) => void,
+  ): Promise<void> {
+    const fresh = loadSite(vm, site.id);
+    if (fresh.doc_root !== null) return; // pengguna sudah memilih sendiri
+    const r = await exec(vm, lease, findDirsArgv(siteRoot(site.domain)), { timeoutMs: 30_000 });
+    const entries = parseDirListing(r.stdout);
+    const fallback = defaultDocRootRel(site.kind);
+    if (entries.find((e) => e.path === fallback)?.hasIndex) return;
+    const pick = suggestDocRoot(site.kind, entries);
+    if (pick) {
+      await applyWebServer(
+        vm,
+        lease,
+        site.web_server,
+        { domain: site.domain, kind: site.kind, phpVersion: site.php_version, docRoot: pick },
+        confOf(fresh),
+      );
+      db.prepare('UPDATE sites SET doc_root = ? WHERE id = ?').run(pick, site.id);
+      log(
+        `\nFolder "${fallback}" tidak berisi index; folder dokumen otomatis diatur ke "${pick}". Ubah lewat tombol Folder dokumen bila salah.\n`,
+      );
+    } else if (entries.some((e) => e.hasIndex)) {
+      log(
+        `\n[peringatan] Folder "${fallback}" tidak berisi index, dan ada beberapa folder lain yang berisi index. Pilih yang benar lewat tombol Folder dokumen di halaman Situs Web.\n`,
+      );
+    } else {
+      log(
+        `\n[peringatan] Tidak ada file index.php/index.html di folder dokumen "${fallback}" maupun subfoldernya. Periksa isi arsip Anda, lalu atur Folder dokumen bila perlu.\n`,
+      );
+    }
+  }
 
   /** Langkah umum: kosongkan staging, ambil source (ekstrak/clone), ratakan folder tunggal, lalu deploySteps. */
   async function runDeploy(
@@ -442,6 +605,7 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
         log,
         ctl,
       );
+      await autoDocRoot(vm, site, lease, log);
       log('\n[SELESAI] Deploy berhasil.\n');
     } finally {
       await exec(vm, lease, ['rm', '-rf', '--', stage]).catch(() => {});
@@ -632,6 +796,110 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
           ),
       );
       rec(req, vm, userId, 'deploy_git', site.domain, 'ok', { url: b.url, branch: b.branch });
+      return toPublicJob(job, false);
+    },
+  );
+
+  /**
+   * Deploy dari URL (mis. Google Drive): VM mengunduh arsip langsung dari sumbernya sehingga tidak lewat panel
+   * dan Cloudflare. Hanya https; jenis arsip dideteksi dari isi berkas. Audit hanya mencatat host (URL bisa
+   * memuat token).
+   */
+  app.post(
+    '/api/vms/:vmId/sites/:siteId/deploy-url',
+    { config: rateLimit(5), onRequest: requireActive },
+    async (req) => {
+      const { vm, userId } = access(req);
+      const { siteId } = siteParams.parse(req.params);
+      const site = loadSite(vm, siteId);
+      const b = z
+        .object({
+          url: z.string().trim().min(1).max(2000),
+          composer: z.boolean().default(true),
+          migrate: z.boolean().default(false),
+          optimize: z.boolean().default(false),
+        })
+        .parse(req.body);
+      const target = normalizeDownloadUrl(b.url);
+      const opts: DeployOptions = {
+        composer: b.composer,
+        migrate: b.migrate,
+        optimize: b.optimize,
+      };
+      const maxDownload = ctx.env.MAX_URL_DEPLOY_MB * 1024 * 1024;
+      const archive = `/tmp/panel-url-${randomBytes(6).toString('hex')}.bin`;
+      const job = ctx.jobs.start(
+        {
+          vmId: vm.id,
+          userId,
+          ip: req.ip,
+          kind: 'deploy',
+          title: `Deploy ${site.domain} dari URL`,
+          vmName: vm.name,
+        },
+        (log, ctl) =>
+          withVm(ctx, vm, async (lease) => {
+            try {
+              log(
+                `Mengunduh arsip dari ${target.host} langsung ke VM (batas ${ctx.env.MAX_URL_DEPLOY_MB} MB).\n`,
+              );
+              await runSteps(
+                lease.client,
+                privOpts(vm),
+                [
+                  {
+                    title: 'Unduh arsip ke VM',
+                    argv: [
+                      'bash',
+                      '-c',
+                      DOWNLOAD_SCRIPT,
+                      'bash',
+                      target.url,
+                      archive,
+                      String(maxDownload),
+                    ],
+                    timeoutMs: 65 * 60_000,
+                    hideCommand: true,
+                  },
+                ],
+                log,
+              );
+              const kind = archiveKindOrThrow(
+                (await exec(vm, lease, ['sh', '-c', DETECT_SCRIPT, 'sh', archive])).stdout,
+                target.provider,
+              );
+              log(`Jenis arsip terdeteksi: ${kind}.\n`);
+              await runDeploy(
+                vm,
+                site,
+                lease,
+                (stage) => [
+                  kind === 'zip'
+                    ? {
+                        title: 'Ekstrak arsip zip',
+                        argv: ['unzip', '-q', '-o', archive, '-d', stage],
+                        timeoutMs: 10 * 60_000,
+                      }
+                    : {
+                        title: 'Ekstrak arsip tar',
+                        argv: ['tar', '-xf', archive, '-C', stage],
+                        timeoutMs: 10 * 60_000,
+                      },
+                ],
+                opts,
+                [],
+                log,
+                ctl,
+              );
+            } finally {
+              await exec(vm, lease, ['rm', '-f', '--', archive]).catch(() => {});
+            }
+          }),
+      );
+      rec(req, vm, userId, 'deploy_url', site.domain, 'ok', {
+        host: target.host,
+        provider: target.provider,
+      });
       return toPublicJob(job, false);
     },
   );

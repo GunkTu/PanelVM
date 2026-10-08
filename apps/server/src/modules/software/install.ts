@@ -20,6 +20,8 @@ export interface Step {
   timeoutMs?: number;
   /** Bila gagal hanya dicatat sebagai peringatan (mis. systemctl di VM tanpa systemd). */
   tolerateFail?: boolean;
+  /** Jangan cetak perintah lengkap di log (mis. skrip panjang atau URL). */
+  hideCommand?: boolean;
   /** Pemeriksaan prasyarat sebelum langkah ini; bila belum terpenuhi, job berhenti menunggu pengguna. */
   gate?: Gate;
 }
@@ -119,6 +121,12 @@ export function buildPlan(
       return {
         steps: [aptUpdate(), aptInstall('Pasang Nginx', ['nginx']), enableService('nginx')],
         verifyPackages: ['nginx'],
+      };
+
+    case 'apache':
+      return {
+        steps: [aptUpdate(), aptInstall('Pasang Apache', ['apache2']), enableService('apache2')],
+        verifyPackages: ['apache2'],
       };
 
     case 'redis':
@@ -322,7 +330,9 @@ export async function runSteps(
 ): Promise<void> {
   for (const [i, st] of steps.entries()) {
     if (st.gate) await passGate(ssh, opts, st.gate, log, ctl);
-    log(`\n[${i + 1}/${steps.length}] ${st.title}\n$ ${st.argv.join(' ')}\n`);
+    log(
+      `\n[${i + 1}/${steps.length}] ${st.title}\n${st.hideCommand ? '' : `$ ${st.argv.join(' ')}\n`}`,
+    );
     const r = await execRemote(ssh, st.argv, {
       ...opts,
       env: st.env,

@@ -17,6 +17,7 @@ const installBody = z.object({
   item: z.enum([
     'base-tools',
     'nginx',
+    'apache',
     'php-repo',
     'php',
     'composer',
@@ -70,7 +71,11 @@ export function softwareRoutes(app: FastifyInstance, ctx: Ctx): void {
         const status = await collectStatus(lease.client, privOpts(vm));
         const row = status.items.find((i) => i.id === body.item);
         if (row?.conflict) throw new AppError(409, 'conflict', row.conflict);
-        if (row && !row.available && ['mariadb', 'mysql', 'redis', 'nginx'].includes(row.id)) {
+        if (
+          row &&
+          !row.available &&
+          ['mariadb', 'mysql', 'redis', 'nginx', 'apache'].includes(row.id)
+        ) {
           throw new AppError(
             409,
             'unavailable',

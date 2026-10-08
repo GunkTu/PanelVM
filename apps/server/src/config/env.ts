@@ -66,6 +66,8 @@ const schema = z.object({
   VM_CHECK_INTERVAL_SEC: z.coerce.number().int().min(0).max(3600).default(60),
   /** Batas ukuran satu upload file/SQL/source code (MB). */
   MAX_UPLOAD_MB: z.coerce.number().int().min(1).max(10240).default(512),
+  /** Batas ukuran arsip yang diunduh langsung oleh VM saat deploy dari URL (MB). */
+  MAX_URL_DEPLOY_MB: z.coerce.number().int().min(1).max(20480).default(2048),
   /**
    * Domain dasar preview (mis. thegt.my.id). Alamat preview = pv-<acak>.<domain>. Kosong = fitur preview mati.
    * Wildcard DNS dan tunnel/proxy untuk *.<domain> harus mengarah ke panel (lihat docs/DEPLOY.md).
