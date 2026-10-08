@@ -24,6 +24,7 @@ import { previewRoutes } from './modules/previews/routes.js';
 import { PreviewManager } from './modules/previews/service.js';
 import { VmWatcher } from './modules/vms/watcher.js';
 import { SshPool } from './ssh/pool.js';
+import { cacheControlFor, isSpaRoute } from './spa.js';
 import { siteRoutes } from './modules/sites/routes.js';
 import { softwareRoutes } from './modules/software/routes.js';
 import { databaseRoutes } from './modules/databases/routes.js';
@@ -173,9 +174,15 @@ export async function buildApp(env: Env, opts: BuildOptions = {}): Promise<Built
   // Produksi: sajikan SPA dari origin yang sama dengan API (tanpa CORS).
   const webDist = join(dirname(fileURLToPath(import.meta.url)), '../../web/dist');
   if (env.NODE_ENV === 'production' && existsSync(webDist)) {
-    await app.register(fastifyStatic, { root: webDist, wildcard: false });
+    await app.register(fastifyStatic, {
+      root: webDist,
+      wildcard: false,
+      cacheControl: false,
+      setHeaders: (reply, filePath) =>
+        void reply.header('cache-control', cacheControlFor(filePath)),
+    });
     app.setNotFoundHandler((req, reply) => {
-      if (req.method === 'GET' && !req.url.startsWith('/api/')) return reply.sendFile('index.html');
+      if (isSpaRoute(req.method, req.url)) return reply.sendFile('index.html');
       return reply.code(404).send({
         error: 'not_found',
         message: 'Alamat tidak ditemukan. Periksa URL atau kembali ke beranda.',
