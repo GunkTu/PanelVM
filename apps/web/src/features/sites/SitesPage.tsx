@@ -18,21 +18,42 @@ import { api } from '../../lib/api';
 import type { Job } from '../../lib/types';
 import { uploadRaw } from '../../lib/upload';
 import { useVmId } from '../layout/useVmId';
+import { LaravelGuide } from './LaravelGuide';
 
 interface Site {
   id: string;
   domain: string;
   kind: 'laravel' | 'php' | 'static';
   phpVersion: string | null;
+  webServer: 'nginx' | 'apache';
   rootPath: string;
   docRoot: string;
+  /** Folder dokumen relatif ("." = folder utama) dan apakah masih mengikuti bawaan jenis situs. */
+  docRootRel: string;
+  docRootAuto: boolean;
   envPath: string | null;
 }
 interface Options {
   nginx: boolean;
+  apache: boolean;
+  /** Web server yang dipakai situs baru; "both" bila keduanya ada (pengguna harus memilih). */
+  webServer: 'nginx' | 'apache' | 'both' | null;
   composer: boolean;
   phpVersions: string[];
 }
+interface DirEntry {
+  path: string;
+  hasIndex: boolean;
+}
+interface DirsResponse {
+  current: string;
+  auto: boolean;
+  defaultPath: string;
+  suggested: string | null;
+  entries: DirEntry[];
+}
+
+const serverLabel = { nginx: 'Nginx', apache: 'Apache' } as const;
 
 const kindLabel = { laravel: 'Laravel', php: 'PHP', static: 'Statis (HTML)' } as const;
 const ARTISAN = [
@@ -49,7 +70,7 @@ const ARTISAN = [
 ] as const;
 const RISKY_ARTISAN = new Set(['migrate', 'db:seed', 'key:generate']);
 
-type Dialog = { kind: 'deploy' | 'artisan' | 'php' | 'delete'; site: Site } | null;
+type Dialog = { kind: 'deploy' | 'artisan' | 'php' | 'delete' | 'docroot'; site: Site } | null;
 
 export function SitesPage() {
   const vmId = useVmId();
@@ -67,7 +88,12 @@ export function SitesPage() {
     queryFn: () => api<Options>(`${base}/sites/options`),
   });
   const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState({ domain: '', kind: 'laravel', phpVersion: '' });
+  const [form, setForm] = useState({
+    domain: '',
+    kind: 'laravel',
+    phpVersion: '',
+    webServer: 'nginx',
+  });
   const [dialog, setDialog] = useState<Dialog>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobSite, setJobSite] = useState<Site | null>(null);
@@ -83,14 +109,15 @@ export function SitesPage() {
           domain: form.domain.trim(),
           kind: form.kind,
           ...(form.kind === 'static' ? {} : { phpVersion: phpChoice }),
+          ...(options.data?.webServer === 'both' ? { webServer: form.webServer } : {}),
         },
       }),
     onSuccess: async (s) => {
       setCreating(false);
-      setForm({ domain: '', kind: 'laravel', phpVersion: '' });
+      setForm({ domain: '', kind: 'laravel', phpVersion: '', webServer: 'nginx' });
       toast.show(
         'success',
-        `Situs ${s.domain} dibuat. Lanjut: Deploy kode, lalu arahkan domain di Nginx Proxy Manager ke IP VM port 80.`,
+        `Situs ${s.domain} dibuat di ${serverLabel[s.webServer]}. Lanjut: Deploy kode, lalu arahkan domain ke IP VM port 80 (atau lihat dulu lewat menu Preview Web).`,
       );
       await refresh();
     },
@@ -103,13 +130,15 @@ export function SitesPage() {
   const [opts, setOpts] = useState({ composer: true, migrate: false, optimize: false });
   const [progress, setProgress] = useState<number | null>(null);
   const [git, setGit] = useState({ url: '', branch: 'main' });
-  const [mode, setMode] = useState<'upload' | 'git'>('upload');
+  const [mode, setMode] = useState<'upload' | 'url' | 'git'>('upload');
+  const [dlUrl, setDlUrl] = useState('');
   const closeDialog = () => {
     setDialog(null);
     setFile(null);
     setProgress(null);
     setArtisanOut(null);
     setDelConfirm('');
+    setDocChoice(null);
   };
 
   const deployUpload = async (site: Site) => {
@@ -146,6 +175,41 @@ export function SitesPage() {
       setJobSite(site);
       setJobId(j.id);
       closeDialog();
+    },
+    onError: onErr,
+  });
+
+  // VM mengunduh arsip langsung dari link (mis. Google Drive), tanpa lewat panel/Cloudflare.
+  const deployUrl = useMutation({
+    mutationFn: (site: Site) =>
+      api<Job>(`${base}/sites/${site.id}/deploy-url`, {
+        method: 'POST',
+        body: { url: dlUrl.trim(), ...opts },
+      }),
+    onSuccess: (j, site) => {
+      setJobSite(site);
+      setJobId(j.id);
+      setDlUrl('');
+      closeDialog();
+    },
+    onError: onErr,
+  });
+
+  // --- folder dokumen ---
+  const [docChoice, setDocChoice] = useState<string | null>(null);
+  const dirs = useQuery({
+    queryKey: ['site-dirs', dialog?.site.id],
+    enabled: dialog?.kind === 'docroot',
+    retry: false,
+    queryFn: () => api<DirsResponse>(`${base}/sites/${dialog!.site.id}/dirs`),
+  });
+  const saveDocRoot = useMutation({
+    mutationFn: ({ site, path }: { site: Site; path: string | null }) =>
+      api<Site>(`${base}/sites/${site.id}/docroot`, { method: 'POST', body: { path } }),
+    onSuccess: async (s) => {
+      toast.show('success', `Folder dokumen ${s.domain} diatur ke "${s.docRootRel}".`);
+      closeDialog();
+      await refresh();
     },
     onError: onErr,
   });
@@ -199,20 +263,22 @@ export function SitesPage() {
       <PageHeader
         icon={<Globe className="h-5 w-5" />}
         title="Situs Web"
-        description="Nginx di VM melayani tiap domain di port 80. Arahkan domain ke VM lewat Nginx Proxy Manager (host: IP VM, port 80)."
+        description="Web server di VM (Nginx atau Apache, salah satu) melayani tiap domain di port 80. Arahkan domain ke VM (host: IP VM, port 80), atau lihat dulu hasilnya lewat menu Preview Web."
         actions={
           <Button
             icon={<Plus className="h-4 w-4" />}
             onClick={() => setCreating(true)}
-            disabled={options.data ? !options.data.nginx : false}
+            disabled={options.data ? !options.data.webServer : false}
           >
             Tambah situs
           </Button>
         }
       />
 
+      <LaravelGuide vmId={vmId} />
+
       {options.data &&
-        (!options.data.nginx ||
+        (!options.data.webServer ||
           options.data.phpVersions.length === 0 ||
           !options.data.composer) && (
           <div
@@ -221,7 +287,9 @@ export function SitesPage() {
           >
             Prasyarat belum lengkap:
             <ul className="ml-5 list-disc">
-              {!options.data.nginx && <li>Nginx belum terpasang.</li>}
+              {!options.data.webServer && (
+                <li>Belum ada web server. Pasang Nginx atau Apache (pilih salah satu).</li>
+              )}
               {options.data.phpVersions.length === 0 && (
                 <li>PHP belum terpasang (diperlukan untuk Laravel/PHP).</li>
               )}
@@ -288,9 +356,14 @@ export function SitesPage() {
               <span className="flex gap-1">
                 <Badge tone="info">{kindLabel[s.kind]}</Badge>
                 {s.phpVersion && <Badge tone="neutral">PHP {s.phpVersion}</Badge>}
+                <Badge tone="neutral">{serverLabel[s.webServer]}</Badge>
               </span>
             </div>
             <p className="mt-1 break-all font-mono text-xs text-slate-500">{s.rootPath}</p>
+            <p className="mt-1 text-xs text-slate-500">
+              Folder dokumen: <code>{s.docRootRel === '.' ? '(folder utama)' : s.docRootRel}</code>
+              {s.docRootAuto ? ' · bawaan' : ' · dipilih'}
+            </p>
             <div className="mt-3 flex flex-wrap gap-2">
               <Button size="sm" onClick={() => setDialog({ kind: 'deploy', site: s })}>
                 Deploy kode
@@ -302,6 +375,16 @@ export function SitesPage() {
               >
                 File
               </ButtonLink>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setDocChoice(null);
+                  setDialog({ kind: 'docroot', site: s });
+                }}
+              >
+                Folder dokumen
+              </Button>
               {s.envPath && (
                 <ButtonLink
                   variant="secondary"
@@ -401,6 +484,32 @@ export function SitesPage() {
               <option value="static">Statis (HTML/JS hasil build)</option>
             </select>
           </div>
+          {options.data?.webServer === 'both' && (
+            <div>
+              <label className="text-sm font-medium text-slate-700" htmlFor="ws">
+                Web server
+              </label>
+              <select
+                id="ws"
+                className="mt-1 w-full h-10 px-3"
+                value={form.webServer}
+                onChange={(e) => setForm((f) => ({ ...f, webServer: e.target.value }))}
+              >
+                <option value="nginx">Nginx</option>
+                <option value="apache">Apache</option>
+              </select>
+              <p className="mt-1 text-sm text-warning">
+                VM ini punya Nginx dan Apache sekaligus (dipasang di luar panel). Pilih yang
+                melayani situs ini; hanya satu yang bisa memakai port 80.
+              </p>
+            </div>
+          )}
+          {options.data?.webServer && options.data.webServer !== 'both' && (
+            <p className="text-sm text-slate-600">
+              Web server: <strong>{serverLabel[options.data.webServer]}</strong> (yang terpasang di
+              VM ini).
+            </p>
+          )}
           {form.kind !== 'static' && (
             <div>
               <label className="text-sm font-medium text-slate-700" htmlFor="phpv">
@@ -447,6 +556,14 @@ export function SitesPage() {
                 >
                   Unggah dan deploy
                 </Button>
+              ) : mode === 'url' ? (
+                <Button
+                  disabled={!dlUrl.trim()}
+                  loading={deployUrl.isPending}
+                  onClick={() => deployUrl.mutate(site)}
+                >
+                  Unduh dan deploy
+                </Button>
               ) : (
                 <Button
                   disabled={!git.url}
@@ -460,7 +577,7 @@ export function SitesPage() {
         }
       >
         <div className="mb-3 flex gap-2" role="tablist">
-          {(['upload', 'git'] as const).map((m) => (
+          {(['upload', 'url', 'git'] as const).map((m) => (
             <button
               key={m}
               type="button"
@@ -469,7 +586,11 @@ export function SitesPage() {
               onClick={() => setMode(m)}
               className={`rounded-md border px-3 py-1.5 text-sm ${mode === m ? 'border-navy bg-navy text-white' : 'border-slate-300'}`}
             >
-              {m === 'upload' ? 'Upload arsip' : 'Dari Git (publik)'}
+              {m === 'upload'
+                ? 'Upload arsip'
+                : m === 'url'
+                  ? 'Dari URL / Google Drive'
+                  : 'Dari Git (publik)'}
             </button>
           ))}
         </div>
@@ -496,6 +617,25 @@ export function SitesPage() {
                 <p className="mt-1 text-xs">Mengunggah {progress}%</p>
               </div>
             )}
+          </div>
+        ) : mode === 'url' ? (
+          <div className="flex flex-col gap-3">
+            <p className="text-slate-600">
+              VM mengunduh arsip <strong>langsung dari link-nya</strong>, tidak lewat panel dan
+              Cloudflare, jadi jauh lebih cepat untuk file besar. Cocok untuk Google Drive atau
+              Dropbox.
+            </p>
+            <Input
+              label="Link arsip (https)"
+              value={dlUrl}
+              onChange={(e) => setDlUrl(e.target.value)}
+              hint="Google Drive: buka file, klik Bagikan, atur 'Siapa saja yang memiliki link', lalu salin link file (bukan folder). Format .zip, .tar.gz, atau .tar."
+              autoFocus
+            />
+            <p className="text-xs text-slate-500">
+              Kamu bisa melihat kemajuan unduhan di log. File yang diunduh dihapus dari VM setelah
+              selesai. Link folder dan Google Docs tidak didukung.
+            </p>
           </div>
         ) : (
           <div className="flex flex-col gap-3">
@@ -593,6 +733,91 @@ export function SitesPage() {
       </Modal>
 
       <Modal
+        open={dialog?.kind === 'docroot'}
+        wide
+        title={`Folder dokumen: ${site?.domain ?? ''}`}
+        onClose={closeDialog}
+        footer={
+          <>
+            <Button variant="ghost" onClick={closeDialog}>
+              Batal
+            </Button>
+            {site && dirs.data && !dirs.data.auto && (
+              <Button
+                variant="secondary"
+                loading={saveDocRoot.isPending && saveDocRoot.variables?.path === null}
+                onClick={() => saveDocRoot.mutate({ site, path: null })}
+              >
+                Pakai bawaan (
+                {dirs.data.defaultPath === '.' ? 'folder utama' : dirs.data.defaultPath})
+              </Button>
+            )}
+            {site && (
+              <Button
+                disabled={docChoice === null || docChoice === dirs.data?.current}
+                loading={saveDocRoot.isPending && saveDocRoot.variables?.path !== null}
+                onClick={() => docChoice !== null && saveDocRoot.mutate({ site, path: docChoice })}
+              >
+                Simpan
+              </Button>
+            )}
+          </>
+        }
+      >
+        <p className="text-slate-600">
+          Folder yang dilayani web server sebagai halaman utama. Laravel biasanya memakai{' '}
+          <code>public</code>. Pilih dari daftar folder yang ada di situs ini; folder yang berisi
+          file <code>index.php</code> atau <code>index.html</code> ditandai.
+        </p>
+        {dirs.isLoading && <Skeleton className="mt-3 h-24" />}
+        {dirs.error && (
+          <p
+            role="alert"
+            className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-red-900"
+          >
+            {dirs.error.message}
+          </p>
+        )}
+        {dirs.data && (
+          <fieldset className="mt-3 max-h-72 overflow-auto rounded-xl border border-slate-200 p-2">
+            <legend className="sr-only">Daftar folder situs</legend>
+            {dirs.data.entries.map((e) => {
+              const selected = (docChoice ?? dirs.data.current) === e.path;
+              return (
+                <label
+                  key={e.path}
+                  className={`flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm ${selected ? 'bg-blue-50' : 'hover:bg-slate-50'}`}
+                >
+                  <input
+                    type="radio"
+                    name="docroot"
+                    checked={selected}
+                    onChange={() => setDocChoice(e.path)}
+                  />
+                  <code className="flex-1 break-all">
+                    {e.path === '.' ? '. (folder utama situs)' : e.path}
+                  </code>
+                  {e.hasIndex ? (
+                    <Badge tone="success">ada index</Badge>
+                  ) : (
+                    <Badge tone="neutral">tanpa index</Badge>
+                  )}
+                  {dirs.data.suggested === e.path && <Badge tone="info">disarankan</Badge>}
+                  {dirs.data.current === e.path && <Badge tone="warning">dipakai</Badge>}
+                </label>
+              );
+            })}
+          </fieldset>
+        )}
+        {dirs.data && dirs.data.entries.every((e) => !e.hasIndex) && (
+          <p className="mt-3 text-sm text-warning">
+            Belum ada file index di folder mana pun. Deploy kode dulu; setelah itu folder yang
+            berisi index akan terdeteksi otomatis.
+          </p>
+        )}
+      </Modal>
+
+      <Modal
         open={dialog?.kind === 'php'}
         title={`Versi PHP: ${site?.domain ?? ''}`}
         onClose={closeDialog}
@@ -650,8 +875,8 @@ export function SitesPage() {
         }
       >
         <p>
-          Konfigurasi nginx situs ini dihapus. Secara bawaan file di <code>{site?.rootPath}</code>{' '}
-          tetap disimpan.
+          Konfigurasi web server situs ini dihapus. Secara bawaan file di{' '}
+          <code>{site?.rootPath}</code> tetap disimpan.
         </p>
         <label className="mt-3 flex items-center gap-2">
           <input
