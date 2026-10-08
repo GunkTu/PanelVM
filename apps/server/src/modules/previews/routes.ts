@@ -6,6 +6,7 @@ import type { Ctx } from '../../context.js';
 import { AppError, forbidden, notFound } from '../../errors.js';
 import { rateLimit } from '../../ratelimit.js';
 import { assertVmAccess, type VmRow } from '../../rbac/index.js';
+import { DOMAIN_RE } from '../sites/nginx.js';
 import { classifyForwardError } from '../../ssh/pool.js';
 import { sshTargetFor } from '../vms/service.js';
 import {
@@ -14,8 +15,7 @@ import {
   MAX_PREVIEWS_PER_VM,
   MAX_TTL_HOURS,
   newSubdomain,
-  PREVIEW_MAX_PORT,
-  PREVIEW_MIN_PORT,
+  isPreviewPort,
   type PreviewRow,
 } from './service.js';
 
@@ -25,7 +25,23 @@ const idParams = z.object({ previewId: z.string().uuid() });
 const ttlHours = z.number().int().min(1).max(MAX_TTL_HOURS);
 
 const createBody = z.object({
-  port: z.number().int().min(PREVIEW_MIN_PORT).max(PREVIEW_MAX_PORT),
+  port: z
+    .number()
+    .int()
+    .refine(
+      isPreviewPort,
+      'Port harus 80 atau antara 1024 dan 65535 (port di bawah 1024 selain 80 dipakai layanan sistem).',
+    ),
+  /** Domain situs di Nginx VM; dikirim sebagai header Host agar Nginx memilih situs yang benar. */
+  hostHeader: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(
+      DOMAIN_RE,
+      'Host situs tidak valid. Contoh: blog.contoh.com (tanpa http:// dan tanpa port).',
+    )
+    .optional(),
   label: z
     .string()
     .trim()
@@ -43,6 +59,7 @@ export function previewRoutes(app: FastifyInstance, ctx: Ctx): void {
     vmId: p.vm_id,
     port: p.port,
     label: p.label,
+    hostHeader: p.host_header,
     url: previews.urlFor(p.subdomain),
     createdAt: p.created_at,
     expiresAt: p.expires_at,
@@ -129,7 +146,7 @@ export function previewRoutes(app: FastifyInstance, ctx: Ctx): void {
       }
       const id = randomUUID();
       db.prepare(
-        'INSERT INTO previews (id, vm_id, user_id, subdomain, port, label, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO previews (id, vm_id, user_id, subdomain, port, label, host_header, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       ).run(
         id,
         vm.id,
@@ -137,6 +154,7 @@ export function previewRoutes(app: FastifyInstance, ctx: Ctx): void {
         newSubdomain(),
         body.port,
         body.label,
+        body.hostHeader ?? null,
         now,
         now + body.ttlHours * 3_600_000,
       );

@@ -229,7 +229,11 @@ describe('pembuatan dan otorisasi', () => {
 
   it('input tidak valid ditolak dengan pesan yang jelas', async () => {
     for (const body of [
-      { port: 80 },
+      { port: 22 },
+      { port: 443 },
+      { port: 1023 },
+      { port: 3000, hostHeader: 'http://blog.contoh.com' },
+      { port: 3000, hostHeader: 'blog.contoh.com:80' },
       { port: 70000 },
       { port: 'abc' },
       { port: 3000.5 },
@@ -547,5 +551,41 @@ describe('kompatibilitas klien lama', () => {
     const off = await call(app, admin, 'PATCH', `/api/vms/${vmA}`, { modules: legacy });
     expect(off.json().modules.previews).toBe(false);
     ctx.db.prepare('UPDATE vms SET modules_enabled = ? WHERE id = ?').run('{"previews":true}', vmA);
+  });
+});
+
+describe('port 80 dan header Host situs', () => {
+  beforeAll(async () => {
+    // sesi B dihapus oleh test suspend sebelumnya; login ulang dengan langkah TOTP baru
+    b = await login(app, userB, 1);
+  });
+
+  it('port 80 diterima (web standar); port sistem lain tetap ditolak', async () => {
+    const ok = await createPreview(b, vmB, { port: 80, hostHeader: 'Blog.Contoh.com' });
+    expect(ok.statusCode).toBe(201);
+    const dto = ok.json() as PreviewDto & { hostHeader: string };
+    expect(dto.port).toBe(80);
+    expect(dto.hostHeader).toBe('blog.contoh.com'); // dinormalisasi huruf kecil
+    const bad = await createPreview(b, vmB, { port: 25 });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json().message).toMatch(/80 atau antara 1024 dan 65535/);
+    await call(app, b, 'DELETE', `/api/vms/${vmB}/previews/${dto.id}`);
+  });
+
+  it('hostHeader dikirim ke aplikasi sebagai Host, menggantikan localhost:port', async () => {
+    const r = await createPreview(b, vmB, { port: appPort, hostHeader: 'situs.contoh.com' });
+    const pv = r.json() as PreviewDto;
+    const res = await raw(hostOf(pv.url), '/');
+    expect(JSON.parse(res.body).host).toBe('situs.contoh.com');
+    expect(JSON.parse(res.body).xfHost).toBe(hostOf(pv.url));
+    await call(app, b, 'DELETE', `/api/vms/${vmB}/previews/${pv.id}`);
+  });
+
+  it('tanpa hostHeader, Host tetap localhost:port', async () => {
+    const r = await createPreview(b, vmB, { port: appPort });
+    const pv = r.json() as PreviewDto & { hostHeader: string | null };
+    expect(pv.hostHeader).toBeNull();
+    expect(JSON.parse((await raw(hostOf(pv.url), '/')).body).host).toBe(`localhost:${appPort}`);
+    await call(app, b, 'DELETE', `/api/vms/${vmB}/previews/${pv.id}`);
   });
 });

@@ -5,6 +5,11 @@ import { notify } from '../notifications/service.js';
 
 export const PREVIEW_MIN_PORT = 1024;
 export const PREVIEW_MAX_PORT = 65535;
+/** Port di bawah 1024 umumnya layanan sistem (ssh, smtp, dll.); satu-satunya pengecualian adalah web standar. */
+export const PREVIEW_EXTRA_PORTS: readonly number[] = [80];
+export const isPreviewPort = (p: number): boolean =>
+  Number.isInteger(p) &&
+  ((p >= PREVIEW_MIN_PORT && p <= PREVIEW_MAX_PORT) || PREVIEW_EXTRA_PORTS.includes(p));
 export const MAX_PREVIEWS_PER_VM = 3;
 export const DEFAULT_TTL_HOURS = 24;
 export const MAX_TTL_HOURS = 168;
@@ -23,6 +28,7 @@ export interface PreviewRow {
   subdomain: string;
   port: number;
   label: string;
+  host_header: string | null;
   created_at: number;
   expires_at: number;
   last_access_at: number | null;

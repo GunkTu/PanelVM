@@ -93,6 +93,8 @@ export interface Preview {
   vmId: string;
   port: number;
   label: string;
+  /** Domain situs di Nginx VM yang dikirim sebagai header Host (opsional). */
+  hostHeader: string | null;
   /** Alamat publik preview. Ini kunci akses: siapa pun yang punya link bisa melihat aplikasinya. */
   url: string;
   createdAt: number;

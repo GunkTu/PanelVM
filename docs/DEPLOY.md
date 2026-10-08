@@ -110,6 +110,7 @@ Client dapat menampilkan aplikasi yang sedang dikembangkan di VM-nya lewat alama
 **Catatan operasional**
 
 - `sshd` di VM harus mengizinkan `AllowTcpForwarding yes` (bawaan Debian/Ubuntu). Bila dilarang, halaman preview dan tombol *Cek port* menjelaskannya.
+- **Port:** 80 atau 1024-65535 (selain port SSH VM). Port sistem lain (22, 25, 443, dst.) ditolak. Untuk situs Nginx di port 80, isi kolom *Host situs* (mis. `blog.contoh.com`) agar Nginx memilih situs yang benar; tanpa itu Nginx menampilkan situs default. Aplikasi yang membuat URL absolut dari domain aslinya (mis. `APP_URL` Laravel) akan mengarahkan pengunjung ke domain itu, bukan ke alamat preview.
 - Header `Host` ke aplikasi ditulis ulang menjadi `localhost:<port>`; `X-Forwarded-For/Host/Proto` diisi panel. Respons diberi `X-Robots-Tag: noindex` dan `Cache-Control: no-cache` bila aplikasi tidak menentukannya.
 - Paket gratis Cloudflare membatasi body request 100 MB; ini berlaku untuk upload lewat preview, bukan untuk file manager panel bila jalurnya sama (periksa batasnya di jalur Anda).
 - **[belum diuji]** di lingkungan nyata: Cloudflare Tunnel dengan hostname wildcard, HMR Vite lewat Cloudflare, dan sshd asli (diuji dengan server SSH tiruan yang meniru kode penolakan sshd). Verifikasi dengan satu aplikasi nyata sebelum dibagikan ke orang lain.

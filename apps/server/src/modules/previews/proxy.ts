@@ -112,7 +112,7 @@ function asSocket(ch: ClientChannel): Duplex {
 
 function upstreamHeaders(
   req: FastifyRequest,
-  port: number,
+  upstreamHost: string,
   host: string,
 ): http.OutgoingHttpHeaders {
   const upgrade = typeof req.headers.upgrade === 'string';
@@ -122,7 +122,7 @@ function upstreamHeaders(
     if (HOP_BY_HOP.has(k) && !(upgrade && (k === 'connection' || k === 'upgrade'))) continue;
     out[k] = v;
   }
-  out.host = `localhost:${port}`;
+  out.host = upstreamHost;
   out['x-forwarded-for'] = req.ip;
   out['x-forwarded-host'] = host;
   out['x-forwarded-proto'] = 'https';
@@ -207,7 +207,7 @@ async function handle(
     createConnection: () => sock,
     method: req.method,
     path: req.url,
-    headers: upstreamHeaders(req, preview.port, host),
+    headers: upstreamHeaders(req, preview.host_header ?? `localhost:${preview.port}`, host),
     setHost: false,
   });
   upstream = preq;

@@ -62,7 +62,7 @@ export function PreviewsPage() {
   const onErr = (e: Error) => toast.show('error', e.message);
 
   const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState({ port: '', label: '', ttlHours: 24 });
+  const [form, setForm] = useState({ port: '', label: '', hostHeader: '', ttlHours: 24 });
   const [dialog, setDialog] = useState<Dialog>(null);
   const [extendHours, setExtendHours] = useState(24);
   const closeDialog = () => setDialog(null);
@@ -71,11 +71,16 @@ export function PreviewsPage() {
     mutationFn: () =>
       api<Preview>(base, {
         method: 'POST',
-        body: { port: Number(form.port), label: form.label.trim(), ttlHours: form.ttlHours },
+        body: {
+          port: Number(form.port),
+          label: form.label.trim(),
+          ttlHours: form.ttlHours,
+          ...(form.hostHeader.trim() ? { hostHeader: form.hostHeader.trim() } : {}),
+        },
       }),
     onSuccess: async (p) => {
       setCreating(false);
-      setForm({ port: '', label: '', ttlHours: 24 });
+      setForm({ port: '', label: '', hostHeader: '', ttlHours: 24 });
       const copied = await copyText(p.url);
       toast.show(
         'success',
@@ -137,8 +142,9 @@ export function PreviewsPage() {
 
   const items = list.data?.items ?? [];
   const full = !!list.data && items.length >= list.data.maxPerVm;
+  const portNum = Number(form.port);
   const portValid =
-    /^\d{4,5}$/.test(form.port) && Number(form.port) >= 1024 && Number(form.port) <= 65535;
+    /^[0-9]{2,5}$/.test(form.port) && (portNum === 80 || (portNum >= 1024 && portNum <= 65535));
 
   return (
     <div>
@@ -199,7 +205,9 @@ export function PreviewsPage() {
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <p className="truncate font-semibold text-navy">{p.label || `Port ${p.port}`}</p>
-                <p className="text-xs text-slate-500">Port {p.port} di VM</p>
+                <p className="text-xs text-slate-500">
+                  Port {p.port} di VM{p.hostHeader ? ` · Host ${p.hostHeader}` : ''}
+                </p>
               </div>
               <span className="flex shrink-0 gap-1">
                 {p.connections > 0 ? (
@@ -319,7 +327,7 @@ export function PreviewsPage() {
             inputMode="numeric"
             value={form.port}
             onChange={(e) => setForm((f) => ({ ...f, port: e.target.value.replace(/\D/g, '') }))}
-            hint="Port tempat aplikasimu mendengarkan di VM, mis. 3000 (Node/Laravel) atau 5173 (Vite). Rentang 1024-65535."
+            hint="Port tempat aplikasimu mendengarkan di VM, mis. 3000 (Node), 5173 (Vite), atau 80 (Nginx). Boleh 80 atau 1024-65535."
             autoFocus
           />
           <Input
@@ -328,6 +336,12 @@ export function PreviewsPage() {
             maxLength={60}
             onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
             hint="Untuk membedakan preview, mis. Tugas Akhir."
+          />
+          <Input
+            label="Host situs (opsional)"
+            value={form.hostHeader}
+            onChange={(e) => setForm((f) => ({ ...f, hostHeader: e.target.value.toLowerCase() }))}
+            hint="Isi domain situs di Nginx VM (mis. blog.contoh.com) bila VM menjalankan beberapa situs di port 80. Tanpa ini Nginx menampilkan situs default."
           />
           <div>
             <label className="text-sm font-medium text-slate-700" htmlFor="ttl">
