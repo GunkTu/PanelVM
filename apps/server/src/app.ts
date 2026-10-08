@@ -19,6 +19,9 @@ import { SecretBox } from './crypto/secrets.js';
 import { migrate, openDb, type Db } from './db/index.js';
 import { AppError } from './errors.js';
 import { JobService } from './modules/jobs/service.js';
+import { isPreviewHost, previewHook } from './modules/previews/proxy.js';
+import { previewRoutes } from './modules/previews/routes.js';
+import { PreviewManager } from './modules/previews/service.js';
 import { VmWatcher } from './modules/vms/watcher.js';
 import { SshPool } from './ssh/pool.js';
 import { siteRoutes } from './modules/sites/routes.js';
@@ -60,9 +63,12 @@ export async function buildApp(env: Env, opts: BuildOptions = {}): Promise<Built
       db.prepare('UPDATE vms SET status = ? WHERE id = ?').run(online ? 'online' : 'offline', vmId),
     ),
     jobs: undefined as unknown as JobService,
+    previews: undefined as unknown as PreviewManager,
     watcher: undefined as unknown as VmWatcher,
   };
   ctx.jobs = new JobService(ctx);
+  ctx.previews = new PreviewManager(ctx);
+  ctx.previews.start();
   ctx.watcher = new VmWatcher(ctx, env.VM_CHECK_INTERVAL_SEC * 1000);
   ctx.watcher.start();
 
@@ -99,7 +105,9 @@ export async function buildApp(env: Env, opts: BuildOptions = {}): Promise<Built
   await app.register(rateLimit, {
     global: true,
     ...(opts.rateLimit === false ? { allowList: () => true } : {}),
-    max: 300,
+    // Trafik preview dihitung per (host preview + IP), terpisah dari batas panel, dan lebih longgar karena satu halaman memuat banyak aset.
+    keyGenerator: (req) => (isPreviewHost(ctx, req) ? `pv:${req.headers.host}:${req.ip}` : req.ip),
+    max: (req) => (isPreviewHost(ctx, req) ? 1500 : 300),
     timeWindow: '1 minute',
     errorResponseBuilder: (_req, context) =>
       new AppError(
@@ -112,6 +120,8 @@ export async function buildApp(env: Env, opts: BuildOptions = {}): Promise<Built
 
   ctx.log = app.log;
   app.decorateRequest('auth', null);
+  // Host preview diambil alih SEBELUM hook auth/CSRF/Origin: itu trafik aplikasi pengguna, bukan API panel.
+  app.addHook('onRequest', previewHook(ctx));
   app.addHook('onRequest', authHook(ctx));
 
   app.setErrorHandler((err, req, reply) => {
@@ -158,6 +168,7 @@ export async function buildApp(env: Env, opts: BuildOptions = {}): Promise<Built
   databaseRoutes(app, ctx);
   softwareRoutes(app, ctx);
   siteRoutes(app, ctx);
+  previewRoutes(app, ctx);
 
   // Produksi: sajikan SPA dari origin yang sama dengan API (tanpa CORS).
   const webDist = join(dirname(fileURLToPath(import.meta.url)), '../../web/dist');
@@ -182,6 +193,7 @@ export async function buildApp(env: Env, opts: BuildOptions = {}): Promise<Built
     clearInterval(purge);
     clearInterval(retentionTimer);
     ctx.watcher.stop();
+    ctx.previews.stop();
     ctx.pool.closeAll();
     ctx.terminals.closeAll('Server dimatikan');
     if (!existingDb) db.close();

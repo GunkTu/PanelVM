@@ -1,4 +1,4 @@
-import type { AddressInfo } from 'node:net';
+import net, { type AddressInfo } from 'node:net';
 import ssh2 from 'ssh2';
 import { generateKeyPair } from '../src/ssh/connect.js';
 
@@ -12,7 +12,7 @@ export interface FakeSsh {
 }
 
 export async function startFakeSsh(
-  opts: { port?: number; hostKey?: string } = {},
+  opts: { port?: number; hostKey?: string; forbidForwarding?: boolean } = {},
 ): Promise<FakeSsh> {
   const hostKey = opts.hostKey ?? generateKeyPair('fake-host').privateKey;
   const conns = new Set<{ end: () => void }>();
@@ -22,6 +22,19 @@ export async function startFakeSsh(
     client.on('error', () => {});
     client.on('authentication', (c) => c.accept());
     client.on('ready', () => {
+      // Port-forward (direct-tcpip) ke loopback: dipakai fitur preview. Penolakan meniru OpenSSH.
+      // Tanpa listener, ssh2 menjawab ADMINISTRATIVELY_PROHIBITED seperti sshd dengan AllowTcpForwarding no.
+      if (!opts.forbidForwarding)
+        client.on('tcpip', (accept, reject, info) => {
+          const sock = net.connect(info.destPort, info.destIP);
+          sock.once('connect', () => {
+            const ch = accept();
+            ch.pipe(sock).pipe(ch);
+            ch.on('close', () => sock.destroy());
+            sock.on('close', () => ch.destroy());
+          });
+          sock.once('error', () => reject());
+        });
       client.on('session', (accept) => {
         const session = accept();
         session.on('exec', (acc) => {

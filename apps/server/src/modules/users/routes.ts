@@ -22,6 +22,7 @@ export function userRoutes(app: FastifyInstance, ctx: Ctx): void {
   function revokeAccess(userId: string, reason: string): void {
     ctx.sessions.destroyAllForUser(userId);
     ctx.terminals.closeByUser(userId, reason);
+    ctx.previews.removeByUser(userId);
   }
 
   app.get('/api/users', { onRequest: requireAdmin }, async () => {

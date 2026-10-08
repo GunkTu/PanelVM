@@ -66,6 +66,19 @@ const schema = z.object({
   VM_CHECK_INTERVAL_SEC: z.coerce.number().int().min(0).max(3600).default(60),
   /** Batas ukuran satu upload file/SQL/source code (MB). */
   MAX_UPLOAD_MB: z.coerce.number().int().min(1).max(10240).default(512),
+  /**
+   * Domain dasar preview (mis. thegt.my.id). Alamat preview = pv-<acak>.<domain>. Kosong = fitur preview mati.
+   * Wildcard DNS dan tunnel/proxy untuk *.<domain> harus mengarah ke panel (lihat docs/DEPLOY.md).
+   */
+  PREVIEW_BASE_DOMAIN: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(
+      /^(?=.{3,200}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/,
+      'harus nama domain tanpa http:// dan tanpa wildcard (contoh: thegt.my.id)',
+    )
+    .optional(),
 });
 
 export type Env = z.infer<typeof schema>;

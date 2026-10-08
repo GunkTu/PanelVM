@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { actor, requireActive, requireAdmin } from '../../auth/plugin.js';
 import type { Ctx } from '../../context.js';
 import { AppError, notFound } from '../../errors.js';
-import { assertVmAccess, VM_MODULES, type VmRow } from '../../rbac/index.js';
+import { assertVmAccess, parseModules, VM_MODULES, type VmRow } from '../../rbac/index.js';
 import { generateKeyPair, scanHostKey } from '../../ssh/connect.js';
 import { notify } from '../notifications/service.js';
 import { toPublicVm, testVm, vmKeyContext } from './service.js';
@@ -18,12 +18,17 @@ const hostSchema = z
     'Host harus berupa IP atau nama host yang valid.',
   );
 
-const modulesSchema = z.object(
-  Object.fromEntries(VM_MODULES.map((m) => [m, z.boolean()])) as Record<
-    (typeof VM_MODULES)[number],
-    z.ZodBoolean
-  >,
-);
+// 'previews' opsional: klien lama (sebelum modul ini ada) tidak mengirimnya; nilai yang ada dipertahankan.
+const modulesSchema = z.object({
+  terminal: z.boolean(),
+  files: z.boolean(),
+  database: z.boolean(),
+  monitoring: z.boolean(),
+  services: z.boolean(),
+  software: z.boolean(),
+  sites: z.boolean(),
+  previews: z.boolean().optional(),
+});
 
 const createBody = z.object({
   name: z
@@ -79,7 +84,10 @@ export function vmRoutes(app: FastifyInstance, ctx: Ctx): void {
     }
     const id = randomUUID();
     const pair = generateKeyPair(`panel-${id.slice(0, 8)}`);
-    const modules = body.modules ?? Object.fromEntries(VM_MODULES.map((m) => [m, true]));
+    const modules = {
+      ...Object.fromEntries(VM_MODULES.map((m) => [m, true])),
+      ...body.modules,
+    };
     db.prepare(
       'INSERT INTO vms (id, name, host, ssh_port, ssh_user, ssh_private_key_enc, ssh_public_key, modules_enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     ).run(
@@ -115,7 +123,9 @@ export function vmRoutes(app: FastifyInstance, ctx: Ctx): void {
       host: body.host ?? vm.host,
       ssh_port: body.sshPort ?? vm.ssh_port,
       ssh_user: body.sshUser ?? vm.ssh_user,
-      modules_enabled: body.modules ? JSON.stringify(body.modules) : vm.modules_enabled,
+      modules_enabled: body.modules
+        ? JSON.stringify({ ...parseModules(vm.modules_enabled), ...body.modules })
+        : vm.modules_enabled,
     };
     const endpointChanged = next.host !== vm.host || next.ssh_port !== vm.ssh_port;
     try {
@@ -139,6 +149,7 @@ export function vmRoutes(app: FastifyInstance, ctx: Ctx): void {
     // Alamat baru berarti host key harus disetujui ulang; modul dimatikan berarti sesi terkait ditutup.
     if (endpointChanged || body.modules?.terminal === false)
       ctx.terminals.closeByVm(id, 'Konfigurasi VM diubah admin');
+    if (endpointChanged || body.modules?.previews === false) ctx.previews.removeByVm(id);
     audit.record({
       userId: actor(req).id,
       vmId: id,
@@ -156,6 +167,7 @@ export function vmRoutes(app: FastifyInstance, ctx: Ctx): void {
     const vm = getVm(id);
     if (!vm) throw notFound('VM');
     ctx.terminals.closeByVm(id, 'VM dihapus dari panel');
+    ctx.previews.removeByVm(id);
     ctx.pool.invalidate(id);
     db.prepare('DELETE FROM vms WHERE id = ?').run(id);
     audit.record({
@@ -283,6 +295,7 @@ export function vmRoutes(app: FastifyInstance, ctx: Ctx): void {
         );
     })();
     ctx.terminals.closeByVm(id, 'Akses VM diubah admin');
+    ctx.previews.removeByVm(id);
     ctx.pool.invalidate(id);
     if (userId)
       notify(

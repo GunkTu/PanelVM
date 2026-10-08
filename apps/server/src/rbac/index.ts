@@ -9,6 +9,7 @@ export const VM_MODULES = [
   'services',
   'software',
   'sites',
+  'previews',
 ] as const;
 export type VmModule = (typeof VM_MODULES)[number];
 export type ModulesEnabled = Record<VmModule, boolean>;
