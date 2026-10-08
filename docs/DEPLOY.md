@@ -92,6 +92,28 @@ TRUST_PROXY=false
 - Monitoring: satu skrip statis baca-saja (`/proc`, `df`, `ps`); CPU diukur dari dua sampel `/proc/stat` selang 1 detik; UI memperbarui tiap 5 detik.
 - Service manager (systemd): `list-units`, `start/stop/restart/reload/enable/disable`, dan `journalctl` (maks. 500 baris). Layanan sistem (`ssh`, `sshd`, `dbus`, `systemd-*`, `networking`, `NetworkManager`) dilindungi: hanya `reload`. **[belum diuji di systemd nyata]**: sandbox pengembangan tidak memakai systemd, jadi integrasi diuji dengan `systemctl`/`journalctl` **palsu** di VM nyata, dan parser diuji dengan format keluaran sesuai dokumentasi systemd. Verifikasi di satu VM nyata sebelum diandalkan.
 
+### Preview web (alamat sementara ke aplikasi di VM)
+
+Client dapat menampilkan aplikasi yang sedang dikembangkan di VM-nya lewat alamat `https://pv-<acak>.<PREVIEW_BASE_DOMAIN>`, tanpa mengatur IP/port/NPM/Cloudflare per VM. Panel meneruskan trafik HTTP dan WebSocket ke `127.0.0.1:<port>` **di dalam VM** lewat koneksi SSH yang sudah ada (port-forward, seperti `ssh -L`). Tidak ada port tambahan di VM dan tidak ada perubahan firewall: VM panel tetap hanya keluar ke port SSH VM.
+
+- **Siapa:** hanya client pemilik VM yang bisa membuat preview. Admin memantau semua preview aktif (menu *Preview Live*, lengkap dengan status live dan jumlah koneksi) dan bisa mencabutnya.
+- **Akses:** alamat acak 130 bit adalah kunci aksesnya (siapa pun yang memegang link bisa melihat aplikasi, mis. dosen). Berlaku 1 jam sampai 7 hari (bawaan 24 jam), bisa diperpanjang dan dicabut. Maksimal 3 preview aktif per VM. Preview terhapus otomatis saat dicabut, kedaluwarsa, akun pemilik disuspend, VM dilepas/dihapus, atau modul `previews` dimatikan; koneksi yang sedang terbuka ikut diputus.
+- **Keamanan:** preview berjalan di origin terpisah dari panel, jadi script aplikasi pengguna tidak bisa memakai sesi panel. Request di host preview tidak pernah mencapai rute panel (termasuk `/api`). Alamat preview tidak dicatat di audit log.
+
+**Menyalakan fitur**
+
+1. Isi `PREVIEW_BASE_DOMAIN=thegt.my.id` di `/etc/panelvm/panel.env`, lalu `sudo systemctl restart panelvm`. Kosong = fitur mati.
+2. Arahkan **semua** `*.thegt.my.id` ke panel. Karena IP publik dari penyedia mengganti IP sumber paket, jalur yang disarankan adalah **Cloudflare Tunnel**: di Zero Trust > Networks > Tunnels > tunnel Anda > *Published application routes*, tambahkan hostname `*.thegt.my.id` dengan layanan `http://<IP VM panel>:3000`. Bila DNS wildcard tidak dibuat otomatis, tambahkan CNAME `*` ke `<id-tunnel>.cfargotunnel.com` (proxied). Sertifikat Universal SSL Cloudflare mencakup `*.thegt.my.id` (satu tingkat); sertifikat wildcard di NPM tidak diperlukan pada jalur ini.
+3. `TRUST_PROXY` harus berisi IP host `cloudflared` (mis. `192.168.10.150`) agar IP pengunjung yang tercatat benar. Tutup port 80/443 publik di MikroTik sehingga tunnel menjadi satu-satunya pintu masuk.
+4. Alternatif lewat NPM (tidak disarankan selama IP sumber diganti penyedia): proxy host `*.thegt.my.id` ke panel dengan sertifikat wildcard (DNS challenge) dan **Websockets Support** aktif.
+
+**Catatan operasional**
+
+- `sshd` di VM harus mengizinkan `AllowTcpForwarding yes` (bawaan Debian/Ubuntu). Bila dilarang, halaman preview dan tombol *Cek port* menjelaskannya.
+- Header `Host` ke aplikasi ditulis ulang menjadi `localhost:<port>`; `X-Forwarded-For/Host/Proto` diisi panel. Respons diberi `X-Robots-Tag: noindex` dan `Cache-Control: no-cache` bila aplikasi tidak menentukannya.
+- Paket gratis Cloudflare membatasi body request 100 MB; ini berlaku untuk upload lewat preview, bukan untuk file manager panel bila jalurnya sama (periksa batasnya di jalur Anda).
+- **[belum diuji]** di lingkungan nyata: Cloudflare Tunnel dengan hostname wildcard, HMR Vite lewat Cloudflare, dan sshd asli (diuji dengan server SSH tiruan yang meniru kode penolakan sshd). Verifikasi dengan satu aplikasi nyata sebelum dibagikan ke orang lain.
+
 ## Backup, restore, dan rotasi kunci
 
 - **Backup DB**: timer `panelvm-backup.timer` atau manual `sudo -u panelvm node --env-file=/etc/panelvm/panel.env dist/scripts/backup-db.js` membuat salinan konsisten (API backup SQLite, aman saat panel berjalan), berizin 0600, menyisakan `BACKUP_KEEP` (14) terbaru di `BACKUP_DIR` (bawaan `<folder DB>/backups`). Cadangan **tidak** berisi master key.
@@ -129,3 +151,4 @@ Daftar jujur hal yang **belum** teruji di lingkungan pengembangan:
 4. Laravel asli dengan dependensi Packagist.
 5. Perilaku `TRUST_PROXY` dengan NPM Anda (uji dengan header palsu dari luar lalu pastikan IP di audit log benar).
 6. Pen-test oleh pihak independen (belum ada).
+7. Preview web: Cloudflare Tunnel dengan hostname wildcard, HMR Vite lewat Cloudflare, dan `sshd` asli dengan `AllowTcpForwarding` (lihat bagian Preview web).

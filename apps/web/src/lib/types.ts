@@ -24,6 +24,7 @@ export interface Modules {
   services: boolean;
   software: boolean;
   sites: boolean;
+  previews: boolean;
 }
 
 export interface Vm {
@@ -85,6 +86,26 @@ export interface Job {
   log?: string;
   createdAt: number;
   finishedAt: number | null;
+}
+
+export interface Preview {
+  id: string;
+  vmId: string;
+  port: number;
+  label: string;
+  /** Alamat publik preview. Ini kunci akses: siapa pun yang punya link bisa melihat aplikasinya. */
+  url: string;
+  createdAt: number;
+  expiresAt: number;
+  lastAccessAt: number | null;
+  connections: number;
+}
+
+export interface AdminPreview extends Preview {
+  vmName: string;
+  vmStatus: 'online' | 'offline' | 'unknown';
+  owner: string;
+  live: boolean;
 }
 
 export interface Credentials {

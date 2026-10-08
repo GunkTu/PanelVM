@@ -5,12 +5,14 @@ import {
   CheckCheck,
   ChevronRight,
   Database,
+  Eye,
   FolderOpen,
   Globe,
   LayoutGrid,
   LogOut,
   Menu,
   Package,
+  Radio,
   ScrollText,
   Server,
   Settings2,
@@ -50,6 +52,7 @@ const PAGE_TITLES: Record<string, string> = {
   databases: 'Database',
   software: 'Aplikasi',
   sites: 'Situs Web',
+  previews: 'Preview Web',
   monitoring: 'Monitoring',
   services: 'Service',
 };
@@ -57,6 +60,7 @@ const ADMIN_TITLES: Record<string, string> = {
   '/admin/vms': 'Kelola VM',
   '/admin/users': 'Kelola Pengguna',
   '/admin/audit': 'Audit Log',
+  '/admin/previews': 'Preview Live',
 };
 
 function NavGroup({
@@ -229,6 +233,7 @@ export function AppLayout() {
             ['databases', 'Database', Database],
             ['software', 'Aplikasi', Package],
             ['sites', 'Situs Web', Globe],
+            ['previews', 'Preview Web', Eye],
             ['monitoring', 'Monitoring', Activity],
             ['services', 'Service', Settings2],
           ] as const
@@ -248,6 +253,7 @@ export function AppLayout() {
       ? [
           { to: '/admin/vms', label: 'Kelola VM', icon: Server },
           { to: '/admin/users', label: 'Kelola Pengguna', icon: Users },
+          { to: '/admin/previews', label: 'Preview Live', icon: Radio },
           { to: '/admin/audit', label: 'Audit Log', icon: ScrollText },
         ]
       : [];

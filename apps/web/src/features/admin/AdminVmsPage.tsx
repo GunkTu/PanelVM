@@ -22,6 +22,7 @@ const MODULE_LABELS: Record<keyof Modules, string> = {
   services: 'Service',
   software: 'Aplikasi (installer)',
   sites: 'Situs Web',
+  previews: 'Preview web',
 };
 const tone = { online: 'success', offline: 'error', unknown: 'neutral' } as const;
 const label = { online: 'Online', offline: 'Offline', unknown: 'Belum dicek' } as const;

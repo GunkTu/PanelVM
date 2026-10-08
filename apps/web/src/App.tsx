@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { AdminAuditPage } from './features/admin/AdminAuditPage';
+import { AdminPreviewsPage } from './features/admin/AdminPreviewsPage';
 import { AdminUsersPage } from './features/admin/AdminUsersPage';
 import { AdminVmsPage } from './features/admin/AdminVmsPage';
 import { RequireAuth } from './features/auth/AuthContext';
@@ -11,6 +12,7 @@ import { AppLayout } from './features/layout/AppLayout';
 import { DatabasesPage } from './features/databases/DatabasesPage';
 import { FilesPage } from './features/files/FilesPage';
 import { MonitoringPage } from './features/monitoring/MonitoringPage';
+import { PreviewsPage } from './features/previews/PreviewsPage';
 import { ServicesPage } from './features/services/ServicesPage';
 import { SitesPage } from './features/sites/SitesPage';
 import { SoftwarePage } from './features/software/SoftwarePage';
@@ -48,6 +50,7 @@ export function App() {
         <Route path="/vms/:vmId/databases" element={<DatabasesPage />} />
         <Route path="/vms/:vmId/software" element={<SoftwarePage />} />
         <Route path="/vms/:vmId/sites" element={<SitesPage />} />
+        <Route path="/vms/:vmId/previews" element={<PreviewsPage />} />
         <Route path="/vms/:vmId/monitoring" element={<MonitoringPage />} />
         <Route path="/vms/:vmId/services" element={<ServicesPage />} />
         <Route
@@ -63,6 +66,14 @@ export function App() {
           element={
             <RequireAuth admin>
               <AdminUsersPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/admin/previews"
+          element={
+            <RequireAuth admin>
+              <AdminPreviewsPage />
             </RequireAuth>
           }
         />
