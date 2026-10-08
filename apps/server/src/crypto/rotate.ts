@@ -4,6 +4,7 @@ import type { SecretBox } from './secrets.js';
 export interface RotateResult {
   vmKeys: number;
   totpSecrets: number;
+  proxmoxTokens: number;
 }
 
 /**
@@ -37,8 +38,19 @@ export function rotateMasterKey(db: Db, oldBox: SecretBox, newBox: SecretBox): R
       );
       totpSecrets += 1;
     }
+    let proxmoxTokens = 0;
+    for (const r of db
+      .prepare('SELECT id, token_secret_enc AS enc FROM proxmox_connections')
+      .all() as { id: string; enc: string }[]) {
+      const ctx = `proxmox.token:${r.id}`;
+      db.prepare('UPDATE proxmox_connections SET token_secret_enc = ? WHERE id = ?').run(
+        newBox.encrypt(oldBox.decrypt(r.enc, ctx), ctx),
+        r.id,
+      );
+      proxmoxTokens += 1;
+    }
     db.prepare('DELETE FROM sessions').run();
     db.prepare('DELETE FROM known_devices').run();
-    return { vmKeys, totpSecrets };
+    return { vmKeys, totpSecrets, proxmoxTokens };
   })();
 }

@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { AdminAuditPage } from './features/admin/AdminAuditPage';
 import { AdminPreviewsPage } from './features/admin/AdminPreviewsPage';
+import { AdminProxmoxPage } from './features/admin/AdminProxmoxPage';
 import { AdminUsersPage } from './features/admin/AdminUsersPage';
 import { AdminVmsPage } from './features/admin/AdminVmsPage';
 import { RequireAuth } from './features/auth/AuthContext';
@@ -66,6 +67,14 @@ export function App() {
           element={
             <RequireAuth admin>
               <AdminUsersPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/admin/proxmox"
+          element={
+            <RequireAuth admin>
+              <AdminProxmoxPage />
             </RequireAuth>
           }
         />

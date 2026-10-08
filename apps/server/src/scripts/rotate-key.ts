@@ -35,7 +35,7 @@ try {
     SecretBox.fromBase64(next),
   );
   console.log(
-    `Selesai: ${r.vmKeys} kunci SSH VM dan ${r.totpSecrets} secret 2FA dienkripsi ulang.`,
+    `Selesai: ${r.vmKeys} kunci SSH VM, ${r.totpSecrets} secret 2FA, dan ${r.proxmoxTokens} token Proxmox dienkripsi ulang.`,
   );
   console.log(
     `Backup sebelum rotasi: ${backup} (berisi data lama; hapus setelah memastikan panel berjalan dengan kunci baru).`,

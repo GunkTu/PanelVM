@@ -4,6 +4,7 @@ import {
   Bell,
   CheckCheck,
   ChevronRight,
+  Cloud,
   Database,
   Eye,
   FolderOpen,
@@ -61,6 +62,7 @@ const ADMIN_TITLES: Record<string, string> = {
   '/admin/users': 'Kelola Pengguna',
   '/admin/audit': 'Audit Log',
   '/admin/previews': 'Preview Live',
+  '/admin/proxmox': 'Proxmox',
 };
 
 function NavGroup({
@@ -254,6 +256,7 @@ export function AppLayout() {
           { to: '/admin/vms', label: 'Kelola VM', icon: Server },
           { to: '/admin/users', label: 'Kelola Pengguna', icon: Users },
           { to: '/admin/previews', label: 'Preview Live', icon: Radio },
+          { to: '/admin/proxmox', label: 'Proxmox', icon: Cloud },
           { to: '/admin/audit', label: 'Audit Log', icon: ScrollText },
         ]
       : [];

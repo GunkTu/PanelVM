@@ -78,7 +78,11 @@ describe('rotasi master key', () => {
     db.prepare(
       "INSERT INTO sessions (id, user_id, token_hash, stage, created_at, last_seen_at, expires_at) VALUES ('s', 'u1', 't', 'active', 1, 1, 9)",
     ).run();
-    expect(rotateMasterKey(db, oldBox, newBox)).toEqual({ vmKeys: 1, totpSecrets: 1 });
+    expect(rotateMasterKey(db, oldBox, newBox)).toEqual({
+      vmKeys: 1,
+      totpSecrets: 1,
+      proxmoxTokens: 0,
+    });
     const vm = db.prepare('SELECT ssh_private_key_enc AS e FROM vms').get() as { e: string };
     expect(newBox.decrypt(vm.e, 'vms.ssh_private_key:a')).toBe('KUNCI-A');
     expect(() => oldBox.decrypt(vm.e, 'vms.ssh_private_key:a')).toThrow();
