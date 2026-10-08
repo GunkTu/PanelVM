@@ -12,7 +12,7 @@ import { assertVmAccess, type VmRow } from '../../rbac/index.js';
 import { execRemote, type ExecResult } from '../../ssh/exec.js';
 import type { Lease } from '../../ssh/pool.js';
 import { Sftp } from '../files/sftp.js';
-import { toPublicJob } from '../jobs/service.js';
+import { toPublicJob, type JobControl } from '../jobs/service.js';
 import { runSteps, type Step } from '../software/install.js';
 import { parseDpkg } from '../software/status.js';
 import { privOpts, withVm } from '../vms/service.js';
@@ -382,6 +382,7 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
     opts: DeployOptions,
     extraExcludes: string[],
     log: (t: string) => void,
+    ctl: JobControl,
   ): Promise<void> {
     const stage = `/var/www/.panel-staging-${randomBytes(6).toString('hex')}`;
     const sftp = new Sftp(await lease.sftp());
@@ -439,6 +440,7 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
           extraExcludes,
         }),
         log,
+        ctl,
       );
       log('\n[SELESAI] Deploy berhasil.\n');
     } finally {
@@ -517,7 +519,7 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
           title: `Deploy ${site.domain}`,
           vmName: vm.name,
         },
-        (log) =>
+        (log, ctl) =>
           withVm(ctx, vm, async (lease) => {
             log(`Arsip ${q.filename} (${received.toLocaleString('en-US')} byte) diterima.\n`);
             try {
@@ -541,6 +543,7 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
                 opts,
                 [],
                 log,
+                ctl,
               );
             } finally {
               await exec(vm, lease, ['rm', '-f', '--', archive]).catch(() => {});
@@ -597,7 +600,7 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
           title: `Deploy ${site.domain} dari Git`,
           vmName: vm.name,
         },
-        (log) =>
+        (log, ctl) =>
           withVm(ctx, vm, (lease) =>
             runDeploy(
               vm,
@@ -624,6 +627,7 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
               opts,
               ['./.git'],
               log,
+              ctl,
             ),
           ),
       );

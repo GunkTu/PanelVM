@@ -12,7 +12,7 @@ export function purgeOld(
     .prepare('DELETE FROM audit_logs WHERE ts < ?')
     .run(now - auditDays * DAY_MS).changes;
   const jobs = db
-    .prepare("DELETE FROM jobs WHERE status != 'running' AND created_at < ?")
+    .prepare("DELETE FROM jobs WHERE status NOT IN ('running', 'waiting') AND created_at < ?")
     .run(now - 30 * DAY_MS).changes;
   db.prepare('DELETE FROM notifications WHERE read_at IS NOT NULL AND created_at < ?').run(
     now - 90 * DAY_MS,

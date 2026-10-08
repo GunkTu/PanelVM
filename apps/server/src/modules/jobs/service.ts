@@ -9,8 +9,9 @@ export interface JobRow {
   user_id: string;
   kind: string;
   title: string;
-  status: 'running' | 'succeeded' | 'failed';
+  status: 'running' | 'waiting' | 'succeeded' | 'failed';
   log: string;
+  wait_message: string | null;
   created_at: number;
   finished_at: number | null;
 }
@@ -20,6 +21,8 @@ export interface PublicJob {
   kind: string;
   title: string;
   status: JobRow['status'];
+  /** Terisi saat status "waiting": apa yang harus dilakukan pengguna sebelum melanjutkan. */
+  waitMessage: string | null;
   log?: string;
   createdAt: number;
   finishedAt: number | null;
@@ -27,33 +30,48 @@ export interface PublicJob {
 
 const LOG_CAP = 512 * 1024;
 const FLUSH_MS = 400;
+/** Job yang menunggu tindakan pengguna dibatalkan otomatis setelah selang ini. */
+export const WAIT_TIMEOUT_MS = 30 * 60_000;
 
 export const toPublicJob = (j: JobRow, withLog: boolean): PublicJob => ({
   id: j.id,
   kind: j.kind,
   title: j.title,
   status: j.status,
+  waitMessage: j.status === 'waiting' ? j.wait_message : null,
   ...(withLog ? { log: j.log } : {}),
   createdAt: j.created_at,
   finishedAt: j.finished_at,
 });
 
-export type JobRunner = (log: (text: string) => void) => Promise<void>;
+export type WaitOutcome = 'resume' | 'cancel';
 
-/** Job latar belakang per VM (maksimal satu yang berjalan per VM, karena apt memakai lock). */
+/** Kendali yang diberikan ke runner: berhenti sampai pengguna menekan Lanjutkan atau Batalkan. */
+export interface JobControl {
+  waitForUser(message: string): Promise<WaitOutcome>;
+}
+
+export type JobRunner = (log: (text: string) => void, ctl: JobControl) => Promise<void>;
+
+/**
+ * Job latar belakang per VM (maksimal satu yang berjalan atau menunggu per VM, karena apt memakai lock dan
+ * langkah berikutnya bergantung pada langkah sebelumnya).
+ */
 export class JobService {
+  private readonly waiters = new Map<string, (outcome: WaitOutcome) => void>();
+
   constructor(private readonly ctx: Ctx) {
-    // Job yang sedang berjalan saat server mati tidak bisa dilanjutkan.
+    // Job yang sedang berjalan atau menunggu saat server mati tidak bisa dilanjutkan.
     ctx.db
       .prepare(
-        "UPDATE jobs SET status = 'failed', finished_at = ?, log = log || ? WHERE status = 'running'",
+        "UPDATE jobs SET status = 'failed', finished_at = ?, wait_message = NULL, log = log || ? WHERE status IN ('running', 'waiting')",
       )
       .run(Date.now(), '\n[Dihentikan karena server panel dimulai ulang]\n');
   }
 
   hasRunning(vmId: string): boolean {
     return !!this.ctx.db
-      .prepare("SELECT 1 AS ok FROM jobs WHERE vm_id = ? AND status = 'running'")
+      .prepare("SELECT 1 AS ok FROM jobs WHERE vm_id = ? AND status IN ('running', 'waiting')")
       .get(vmId);
   }
 
@@ -102,10 +120,46 @@ export class JobService {
       buffer += text;
     };
 
+    const ctl: JobControl = {
+      waitForUser: (message) =>
+        new Promise<WaitOutcome>((resolve) => {
+          let settled = false;
+          const finish = (outcome: WaitOutcome) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(expire);
+            this.waiters.delete(id);
+            db.prepare(
+              "UPDATE jobs SET status = 'running', wait_message = NULL WHERE id = ? AND status = 'waiting'",
+            ).run(id);
+            resolve(outcome);
+          };
+          const expire = setTimeout(() => {
+            log('\n[Menunggu terlalu lama (30 menit), proses dibatalkan.]\n');
+            finish('cancel');
+          }, WAIT_TIMEOUT_MS);
+          expire.unref();
+          this.waiters.set(id, finish);
+          log(`\n[MENUNGGU TINDAKAN] ${message}\n`);
+          flush();
+          db.prepare("UPDATE jobs SET status = 'waiting', wait_message = ? WHERE id = ?").run(
+            message,
+            id,
+          );
+          notify(
+            db,
+            input.userId,
+            'job_waiting',
+            `Butuh tindakan: ${input.title}`,
+            `${input.title} di VM "${input.vmName}" berhenti dan menunggu Anda. Buka halaman terkait, ikuti petunjuknya, lalu klik Lanjutkan.`,
+          );
+        }),
+    };
+
     void (async () => {
       let ok = true;
       try {
-        await runner(log);
+        await runner(log, ctl);
       } catch (e) {
         ok = false;
         log(
@@ -114,12 +168,11 @@ export class JobService {
         if (!(e instanceof AppError)) this.ctx.log?.error({ err: e }, 'job error');
       } finally {
         clearInterval(timer);
+        this.waiters.get(id)?.('cancel');
         flush();
-        db.prepare('UPDATE jobs SET status = ?, finished_at = ? WHERE id = ?').run(
-          ok ? 'succeeded' : 'failed',
-          Date.now(),
-          id,
-        );
+        db.prepare(
+          'UPDATE jobs SET status = ?, finished_at = ?, wait_message = NULL WHERE id = ?',
+        ).run(ok ? 'succeeded' : 'failed', Date.now(), id);
         notify(
           db,
           input.userId,
@@ -140,6 +193,21 @@ export class JobService {
     })();
 
     return db.prepare('SELECT * FROM jobs WHERE id = ?').get(id) as JobRow;
+  }
+
+  /** Lanjutkan atau batalkan job yang sedang menunggu. Hanya job milik VM yang bersangkutan. */
+  respond(vmId: string, jobId: string, outcome: WaitOutcome): JobRow {
+    const job = this.get(vmId, jobId);
+    const waiter = this.waiters.get(job.id);
+    if (job.status !== 'waiting' || !waiter) {
+      throw new AppError(
+        409,
+        'job_not_waiting',
+        'Proses ini tidak sedang menunggu tindakan. Muat ulang halaman untuk melihat status terbarunya.',
+      );
+    }
+    waiter(outcome);
+    return this.get(vmId, jobId);
   }
 
   get(vmId: string, jobId: string): JobRow {

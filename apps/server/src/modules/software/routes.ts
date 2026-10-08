@@ -162,6 +162,28 @@ export function softwareRoutes(app: FastifyInstance, ctx: Ctx): void {
     return { items: ctx.jobs.list(vm.id).map((j) => toPublicJob(j, false)) };
   });
 
+  /** Lanjutkan atau batalkan job yang berhenti menunggu tindakan (mis. .env belum benar). */
+  for (const outcome of ['resume', 'cancel'] as const) {
+    app.post(
+      `/api/vms/:vmId/jobs/:jobId/${outcome}`,
+      { config: rateLimit(30), onRequest: requireActive },
+      async (req) => {
+        const { vm, userId } = access(req);
+        const { jobId } = z.object({ jobId: z.string().uuid() }).parse(req.params);
+        const job = ctx.jobs.respond(vm.id, jobId, outcome);
+        ctx.audit.record({
+          userId,
+          vmId: vm.id,
+          ip: req.ip,
+          action: `job.${outcome}`,
+          target: job.title,
+          result: 'ok',
+        });
+        return toPublicJob(job, false);
+      },
+    );
+  }
+
   app.get('/api/vms/:vmId/jobs/:jobId', { onRequest: requireActive }, async (req) => {
     const { vm } = access(req);
     const { jobId } = z.object({ jobId: z.string().uuid() }).parse(req.params);

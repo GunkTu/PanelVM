@@ -9,6 +9,7 @@ import {
   phpPackages,
   type ItemId,
 } from './catalog.js';
+import type { JobControl } from '../jobs/service.js';
 import type { OsInfo } from './status.js';
 
 export interface Step {
@@ -19,6 +20,20 @@ export interface Step {
   timeoutMs?: number;
   /** Bila gagal hanya dicatat sebagai peringatan (mis. systemctl di VM tanpa systemd). */
   tolerateFail?: boolean;
+  /** Pemeriksaan prasyarat sebelum langkah ini; bila belum terpenuhi, job berhenti menunggu pengguna. */
+  gate?: Gate;
+}
+
+export interface Gate {
+  title: string;
+  /** Perintah pemeriksa: kode keluar 0 = prasyarat terpenuhi. Keluarannya ikut ke pesan untuk pengguna. */
+  argv: string[];
+  env?: Record<string, string>;
+  timeoutMs?: number;
+  /** Pesan tindakan untuk pengguna (Bahasa Indonesia: apa yang terjadi + langkah berikutnya). */
+  message: (detail: string) => string;
+  /** Pesan galat bila pengguna membatalkan. */
+  cancelMessage: string;
 }
 
 export interface InstallRequest {
@@ -268,13 +283,45 @@ export interface RunLog {
   (text: string): void;
 }
 
+/** Ulangi pemeriksaan sampai terpenuhi; tiap kegagalan menghentikan job menunggu pengguna (Lanjutkan/Batalkan). */
+async function passGate(
+  ssh: SshClient,
+  opts: Pick<ExecOptions, 'sudo'>,
+  gate: Gate,
+  log: RunLog,
+  ctl?: JobControl,
+): Promise<void> {
+  for (;;) {
+    log(`\n[Periksa] ${gate.title}\n`);
+    const r = await execRemote(ssh, gate.argv, {
+      ...opts,
+      env: gate.env,
+      timeoutMs: gate.timeoutMs ?? 60_000,
+    });
+    if (r.code === 0) {
+      log(`${r.stdout.trim()}\nPemeriksaan lolos.\n`);
+      return;
+    }
+    const detail = `${r.stdout}${r.stderr}`.trim().slice(0, 800);
+    log(`${detail}\n`);
+    if (!ctl) {
+      throw new AppError(422, 'gate_failed', gate.message(detail));
+    }
+    const outcome = await ctl.waitForUser(gate.message(detail));
+    if (outcome === 'cancel') throw new AppError(409, 'job_cancelled', gate.cancelMessage);
+    log('\nMelanjutkan: memeriksa ulang...\n');
+  }
+}
+
 export async function runSteps(
   ssh: SshClient,
   opts: Pick<ExecOptions, 'sudo'>,
   steps: Step[],
   log: RunLog,
+  ctl?: JobControl,
 ): Promise<void> {
   for (const [i, st] of steps.entries()) {
+    if (st.gate) await passGate(ssh, opts, st.gate, log, ctl);
     log(`\n[${i + 1}/${steps.length}] ${st.title}\n$ ${st.argv.join(' ')}\n`);
     const r = await execRemote(ssh, st.argv, {
       ...opts,

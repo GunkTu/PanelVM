@@ -82,7 +82,9 @@ export interface Job {
   id: string;
   kind: string;
   title: string;
-  status: 'running' | 'succeeded' | 'failed';
+  status: 'running' | 'waiting' | 'succeeded' | 'failed';
+  /** Terisi saat status waiting: apa yang harus dilakukan sebelum Lanjutkan. */
+  waitMessage?: string | null;
   log?: string;
   createdAt: number;
   finishedAt: number | null;

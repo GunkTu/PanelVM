@@ -70,6 +70,7 @@ export function SitesPage() {
   const [form, setForm] = useState({ domain: '', kind: 'laravel', phpVersion: '' });
   const [dialog, setDialog] = useState<Dialog>(null);
   const [jobId, setJobId] = useState<string | null>(null);
+  const [jobSite, setJobSite] = useState<Site | null>(null);
   const refresh = () => qc.invalidateQueries({ queryKey: ['sites', vmId] });
   const onErr = (e: Error) => toast.show('error', e.message);
   const phpChoice = form.phpVersion || options.data?.phpVersions[0] || '';
@@ -127,6 +128,7 @@ export function SitesPage() {
         file,
         setProgress,
       );
+      setJobSite(site);
       setJobId(job.id);
       closeDialog();
     } catch (e) {
@@ -140,7 +142,8 @@ export function SitesPage() {
         method: 'POST',
         body: { ...git, ...opts },
       }),
-    onSuccess: (j) => {
+    onSuccess: (j, site) => {
+      setJobSite(site);
       setJobId(j.id);
       closeDialog();
     },
@@ -237,6 +240,22 @@ export function SitesPage() {
           <JobLog
             vmId={vmId}
             jobId={jobId}
+            waitActions={
+              <>
+                <ButtonLink variant="secondary" size="sm" to={`/vms/${vmId}/databases`}>
+                  Buka Database
+                </ButtonLink>
+                {jobSite?.envPath && (
+                  <ButtonLink
+                    variant="secondary"
+                    size="sm"
+                    to={`/vms/${vmId}/files?path=${encodeURIComponent(jobSite.rootPath)}&edit=${encodeURIComponent(jobSite.envPath)}`}
+                  >
+                    Edit .env
+                  </ButtonLink>
+                )}
+              </>
+            }
             onDone={(j) =>
               toast.show(
                 j.status === 'succeeded' ? 'success' : 'error',

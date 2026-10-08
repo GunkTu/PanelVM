@@ -16,6 +16,61 @@ export const ARTISAN_COMMANDS = {
 } as const satisfies Record<string, readonly string[]>;
 export type ArtisanCommand = keyof typeof ARTISAN_COMMANDS;
 
+/**
+ * Pemeriksa koneksi database untuk proyek Laravel (kode PHP statis, dijalankan dengan `php -r` di folder aplikasi).
+ * Membaca .env sendiri, jadi tidak bergantung pada vendor/ atau cache konfigurasi. Kode keluar 0 = siap;
+ * keluaran hanya memuat host, port, nama database, dan user (tidak pernah password).
+ */
+export const DB_CHECK_PHP = `
+$env = [];
+$lines = @file('.env', FILE_IGNORE_NEW_LINES);
+if ($lines === false) { fwrite(STDERR, 'Gagal: file .env tidak ditemukan di folder aplikasi.' . PHP_EOL); exit(2); }
+foreach ($lines as $line) {
+  $line = trim($line);
+  if ($line === '' || $line[0] === '#' || strpos($line, '=') === false) continue;
+  [$k, $v] = explode('=', $line, 2);
+  $k = trim($k); $v = trim($v);
+  if (strpos($k, 'export ') === 0) $k = trim(substr($k, 7));
+  if ($k === '') continue;
+  if ($v !== '' && ($v[0] === '"' || $v[0] === "'")) {
+    $q = $v[0]; $end = strrpos($v, $q);
+    $v = ($end !== false && $end > 0) ? substr($v, 1, $end - 1) : substr($v, 1);
+  } else {
+    $h = strpos($v, ' #');
+    if ($h !== false) $v = rtrim(substr($v, 0, $h));
+  }
+  $env[$k] = $v;
+}
+$g = function ($k, $d = '') use ($env) { return (isset($env[$k]) && $env[$k] !== '') ? $env[$k] : $d; };
+$drv = strtolower($g('DB_CONNECTION', 'mysql'));
+$pass = $g('DB_PASSWORD');
+$fail = function ($msg) use ($pass) {
+  if ($pass !== '') $msg = str_replace($pass, '***', $msg);
+  fwrite(STDERR, 'Gagal: ' . substr($msg, 0, 400) . PHP_EOL);
+  exit(1);
+};
+if ($drv === 'sqlite') {
+  $f = $g('DB_DATABASE', 'database/database.sqlite');
+  if ($f === ':memory:') { echo 'DB_CONNECTION=sqlite (memori)' . PHP_EOL; exit(0); }
+  if ($f[0] !== '/') $f = getcwd() . '/' . $f;
+  echo 'DB_CONNECTION=sqlite file=' . $f . PHP_EOL;
+  if (!is_file($f)) $fail('File SQLite tidak ada: ' . $f . '. Buat file kosong itu atau ubah DB_DATABASE.');
+  exit(0);
+}
+if (!in_array($drv, ['mysql', 'mariadb', 'pgsql'], true)) { echo 'DB_CONNECTION=' . $drv . ' (tidak diperiksa otomatis)' . PHP_EOL; exit(0); }
+$host = $g('DB_HOST', '127.0.0.1'); $port = $g('DB_PORT', $drv === 'pgsql' ? '5432' : '3306');
+$db = $g('DB_DATABASE'); $user = $g('DB_USERNAME', $drv === 'pgsql' ? 'postgres' : 'root');
+echo 'DB_CONNECTION=' . $drv . ' host=' . $host . ' port=' . $port . ' database=' . ($db === '' ? '(kosong)' : $db) . ' user=' . $user . PHP_EOL;
+if ($db === '') $fail('DB_DATABASE masih kosong di .env.');
+$ext = $drv === 'pgsql' ? 'pdo_pgsql' : 'pdo_mysql';
+if (!extension_loaded($ext)) $fail('Ekstensi PHP ' . $ext . ' belum terpasang untuk versi PHP ini.');
+$dsn = $drv === 'pgsql' ? 'pgsql:host=' . $host . ';port=' . $port . ';dbname=' . $db : 'mysql:host=' . $host . ';port=' . $port . ';dbname=' . $db . ';charset=utf8mb4';
+try {
+  new PDO($dsn, $user, $pass, [PDO::ATTR_TIMEOUT => 5, PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+  echo 'Koneksi database berhasil.' . PHP_EOL; exit(0);
+} catch (Throwable $e) { $fail($e->getMessage()); }
+`;
+
 export interface DeployOptions {
   composer: boolean;
   migrate: boolean;
@@ -154,6 +209,19 @@ export function deploySteps(i: DeployPlanInput): Step[] {
         title: 'Jalankan migrasi database',
         argv: phpIn(root, v, ['artisan', 'migrate', '--force']),
         timeoutMs: 20 * 60_000,
+        // Berhenti menunggu pengguna memperbaiki .env alih-alih gagal dengan kesalahan SQL yang membingungkan.
+        gate: {
+          title: 'Koneksi database dari .env',
+          argv: phpIn(root, v, ['-r', DB_CHECK_PHP]),
+          timeoutMs: 30_000,
+          message: (detail) =>
+            `Migrasi ditunda karena aplikasi belum bisa terhubung ke database.
+${detail}
+
+Langkah: (1) buka menu Database lalu buat database dan user untuk aplikasi ini, (2) di halaman Situs Web klik Edit .env dan isi DB_CONNECTION, DB_HOST, DB_PORT, DB_DATABASE, DB_USERNAME, DB_PASSWORD, (3) kembali ke sini lalu klik Lanjutkan. Klik Batalkan bila ingin berhenti.`,
+          cancelMessage:
+            'Dibatalkan sebelum migrasi. Kode sudah ter-deploy; perbaiki .env lalu jalankan migrasi dari tombol Artisan atau deploy ulang.',
+        },
       });
     if (i.opts.optimize)
       steps.push({
