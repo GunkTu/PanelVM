@@ -35,9 +35,21 @@ interface NodeInventory {
   cpuCores: number | null;
   memFreeBytes: number | null;
   memTotalBytes: number | null;
-  templates: { vmid: number; name: string; os: { id: string; label: string; sshUser: string } }[];
+  templates: {
+    vmid: number;
+    name: string;
+    os: { id: string; label: string; sshUser: string };
+    diskStorage: string | null;
+    shared: boolean;
+  }[];
   ignoredTemplates: number;
-  storages: { name: string; type: string; availBytes: number | null; totalBytes: number | null }[];
+  storages: {
+    name: string;
+    type: string;
+    availBytes: number | null;
+    totalBytes: number | null;
+    shared: boolean;
+  }[];
   bridges: string[];
   error?: string;
 }
@@ -292,12 +304,29 @@ function TestPanel({ result }: { result: TestResult }) {
                       <li key={t.vmid}>
                         {t.os.label}{' '}
                         <span className="text-slate-500">
-                          (#{t.vmid}, {t.name})
+                          (#{t.vmid}, {t.name}
+                          {t.diskStorage
+                            ? `, disk di ${t.diskStorage} — ${t.shared ? 'bersama' : 'lokal node ini'}`
+                            : ''}
+                          )
                         </span>
                       </li>
                     ))}
                   </ul>
                 )}
+                {(() => {
+                  const fromOthers = inventory.nodes
+                    .filter((o) => o.node !== n.node && o.online)
+                    .flatMap((o) =>
+                      o.templates.filter((t) => t.shared).map((t) => ({ ...t, owner: o.node })),
+                    );
+                  return fromOthers.length ? (
+                    <p className="mt-1 text-sm text-green-700">
+                      Juga bisa dipakai di node ini (template bersama dari node lain):{' '}
+                      {fromOthers.map((t) => `${t.os.label} (di ${t.owner})`).join(', ')}.
+                    </p>
+                  ) : null;
+                })()}
                 {n.ignoredTemplates > 0 && (
                   <p className="text-xs text-slate-500">
                     {n.ignoredTemplates} template lain diabaikan (nama bukan Debian/Ubuntu).
@@ -309,7 +338,7 @@ function TestPanel({ result }: { result: TestResult }) {
                     ? n.storages
                         .map(
                           (s) =>
-                            `${s.name}${s.availBytes != null ? ` (${formatBytes(s.availBytes)} bebas)` : ''}`,
+                            `${s.name}${s.availBytes != null ? ` (${formatBytes(s.availBytes)} bebas)` : ''}${s.shared ? ' [bersama]' : ''}`,
                         )
                         .join(', ')
                     : 'tidak ada'}
