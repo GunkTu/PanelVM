@@ -22,10 +22,12 @@ Jalankan di shell salah satu node (konfigurasi pengguna dan ACL berlaku untuk se
 
 ```
 pveum pool add panel --comment "VM yang dibuat oleh Panel VM"
-pveum role add PanelVM --privs "VM.Allocate VM.Clone VM.Config.CPU VM.Config.Memory VM.Config.Disk VM.Config.Network VM.Config.Cloudinit VM.Config.Options VM.PowerMgmt VM.Audit Datastore.AllocateSpace Datastore.Audit SDN.Use Pool.Audit Sys.Audit"
+pveum role add PanelVM --privs "VM.Allocate VM.Clone VM.Config.CPU VM.Config.Memory VM.Config.Disk VM.Config.Network VM.Config.Cloudinit VM.Config.CDROM VM.Config.Options VM.PowerMgmt VM.Audit Datastore.AllocateSpace Datastore.Audit SDN.Use Pool.Audit Sys.Audit"
 pveum user add panel@pve --comment "Panel VM"
 pveum user token add panel@pve panel --privsep 1
 ```
+
+Bila peran `PanelVM` sudah dibuat sebelum hak `VM.Config.CDROM` masuk daftar (panel menambah disk cloud-init, yang dihitung Proxmox sebagai drive CD-ROM), tambahkan tanpa mengganti yang lama: `pveum role modify PanelVM --privs "VM.Config.CDROM" --append 1`. Pesan galat 403 di log pembuatan VM menyebut hak yang diminta Proxmox.
 
 Catat **Token ID** (`panel@pve!panel`) dan **secret** dari keluaran terakhir.
 

@@ -68,6 +68,8 @@ export interface Recorded {
 export interface FakePveOptions {
   /** Jenis tugas yang berakhir gagal, mis. 'qmclone' atau 'qmstart'. */
   failTasks?: string[];
+  /** PUT config ditolak 403 seperti Proxmox bila hak kurang; nilainya nama hak yang disebut di pesan. */
+  forbidConfig?: string;
   /** Ruang kosong local-lvm di semua node (byte). */
   localLvmAvail?: number;
 }
@@ -112,7 +114,13 @@ export async function startFakePve(
       });
       const send = (status: number, data?: unknown) => {
         res.writeHead(status, { 'content-type': 'application/json' });
-        res.end(JSON.stringify(status < 400 ? { data } : { errors: 'x' }));
+        res.end(
+          JSON.stringify(
+            status < 400
+              ? { data }
+              : { data: null, message: typeof data === 'string' ? data : 'x' },
+          ),
+        );
       };
       if (req.headers.authorization !== `PVEAPIToken=${PVE_TOKEN_ID}=${PVE_SECRET}`)
         return send(401);
@@ -178,6 +186,11 @@ export async function startFakePve(
         created.set(Number(f.newid), { node: target, name: f.name ?? '' });
         return send(200, upid(m[1]!, 'qmclone', Number(m[2])));
       }
+      if (opts.forbidConfig && req.method === 'PUT' && path.endsWith('/config'))
+        return send(
+          403,
+          `Permission check failed (/vms/${path.split('/')[4]}, ${opts.forbidConfig})`,
+        );
       if (req.method === 'PUT' && /^\/nodes\/pve[12]\/qemu\/\d+\/(config|resize)$/.test(path))
         return send(200, null);
       if (

@@ -259,6 +259,7 @@ export const REQUIRED_PRIVILEGES = {
     'VM.Config.Disk',
     'VM.Config.Network',
     'VM.Config.Cloudinit',
+    'VM.Config.CDROM',
     'VM.Config.Options',
     'VM.PowerMgmt',
     'VM.Audit',

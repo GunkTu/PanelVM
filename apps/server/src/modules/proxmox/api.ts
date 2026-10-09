@@ -109,6 +109,16 @@ export async function scanCertificate(
   }
 }
 
+/** Pesan dari tubuh jawaban Proxmox ({"message": "..."}), dirapikan dan dibatasi; kosong bila tidak ada. */
+function proxmoxMessage(body: string): string {
+  try {
+    const m = (JSON.parse(body) as { message?: unknown }).message;
+    return typeof m === 'string' ? m.replace(/[\s]+/g, ' ').trim().slice(0, 200) : '';
+  } catch {
+    return '';
+  }
+}
+
 function describeFailure(status: number, path: string, body: string): AppError {
   if (status === 401)
     return new AppError(
@@ -120,7 +130,7 @@ function describeFailure(status: number, path: string, body: string): AppError {
     return new AppError(
       403,
       'proxmox_forbidden',
-      `Token tidak punya hak untuk ${path} (403). Tambahkan hak yang kurang sesuai docs/PROXMOX.md, lalu coba lagi.`,
+      `Token tidak punya hak untuk ${path} (403).${proxmoxMessage(body) ? ` Proxmox: ${proxmoxMessage(body)}.` : ''} Tambahkan hak yang kurang ke peran PanelVM sesuai docs/PROXMOX.md, lalu coba lagi.`,
     );
   if (status === 404)
     return new AppError(404, 'proxmox_not_found', `Proxmox tidak menemukan ${path}.`);

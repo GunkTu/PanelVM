@@ -137,6 +137,7 @@ describe.skipIf(!hasOpenssl)('klien dan rute dengan server Proxmox tiruan (HTTPS
           'VM.Config.Disk',
           'VM.Config.Network',
           'VM.Config.Cloudinit',
+          'VM.Config.CDROM',
           'VM.Config.Options',
           'VM.PowerMgmt',
           'VM.Audit',

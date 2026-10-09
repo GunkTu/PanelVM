@@ -524,6 +524,33 @@ describe.skipIf(!hasOpenssl)('membuat VM dari panel (Proxmox dan SSH tiruan)', (
     }
   });
 
+  it('hak token kurang di tengah jalan (403): log menyebut hak yang diminta Proxmox, VM tidak dihapus', async () => {
+    reset();
+    const denying = await startFakePve(tls, { forbidConfig: 'VM.Config.CDROM' });
+    try {
+      await call(app, admin, 'PUT', `/api/admin/proxmox/${connId}/endpoints`, {
+        endpoints: [{ url: denying.url, fingerprint: tls.fingerprint }],
+      });
+      const { job, vmId } = await finish(await create({ osId: 'ubuntu2404', node: 'pve2' }));
+      expect(job.status).toBe('failed');
+      expect(job.log).toMatch(/Proxmox: Permission check failed \(\/vms\/200, VM\.Config\.CDROM\)/);
+      expect(job.log).toMatch(/Tambahkan hak yang kurang ke peran PanelVM/);
+      expect(job.log).toMatch(/VM sudah dibuat di Proxmox \(node pve2, nomor 200\)/);
+      expect(job.log).toMatch(/Panel TIDAK menghapusnya/);
+      expect(ctx.db.prepare('SELECT COUNT(*) c FROM vm_proxmox WHERE vm_id = ?').get(vmId)).toEqual(
+        {
+          c: 1,
+        },
+      );
+      expect(denying.requests.some((r) => r.method === 'DELETE')).toBe(false);
+    } finally {
+      await call(app, admin, 'PUT', `/api/admin/proxmox/${connId}/endpoints`, {
+        endpoints: [{ url: fake.url, fingerprint: tls.fingerprint }],
+      });
+      await denying.close();
+    }
+  });
+
   it('gagal saat clone: tidak ada tautan, pesan menyebut belum ada VM di Proxmox', async () => {
     reset();
     const failing = await startFakePve(tls, { failTasks: ['qmclone'] });
