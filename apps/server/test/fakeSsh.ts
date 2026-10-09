@@ -12,7 +12,15 @@ export interface FakeSsh {
 }
 
 export async function startFakeSsh(
-  opts: { port?: number; hostKey?: string; forbidForwarding?: boolean } = {},
+  opts: {
+    port?: number;
+    hostKey?: string;
+    forbidForwarding?: boolean;
+    /** Bila diisi, setiap perintah exec dicatat (beserta stdin) di sini. */
+    execLog?: { command: string; stdin: string }[];
+    /** Kode keluar per perintah (bawaan 0). */
+    execExit?: (command: string) => number;
+  } = {},
 ): Promise<FakeSsh> {
   const hostKey = opts.hostKey ?? generateKeyPair('fake-host').privateKey;
   const conns = new Set<{ end: () => void }>();
@@ -37,10 +45,20 @@ export async function startFakeSsh(
         });
       client.on('session', (accept) => {
         const session = accept();
-        session.on('exec', (acc) => {
+        session.on('exec', (acc, _rej, info) => {
           const stream = acc();
-          stream.exit(0);
-          stream.end();
+          if (!opts.execLog && !opts.execExit) {
+            stream.exit(0);
+            stream.end();
+            return;
+          }
+          let stdin = '';
+          stream.on('data', (d: Buffer) => (stdin += d.toString('utf8')));
+          stream.on('end', () => {
+            opts.execLog?.push({ command: info.command, stdin });
+            stream.exit(opts.execExit?.(info.command) ?? 0);
+            stream.end();
+          });
         });
         session.on('pty', (acc) => acc && acc());
         session.on('window-change', (acc) => acc && acc());

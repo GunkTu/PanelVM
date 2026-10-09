@@ -52,6 +52,8 @@ interface SiteRow {
   web_server: WebServer;
   /** NULL = bawaan menurut jenis situs; "." = folder utama; selain itu subfolder relatif. */
   doc_root: string | null;
+  /** 1 = situs utama Nginx (default_server): melayani Host yang tidak cocok dengan domain mana pun. */
+  is_default: number;
   created_at: number;
 }
 
@@ -76,6 +78,7 @@ const toPublic = (s: SiteRow) => ({
   /** Folder dokumen relatif ("." = folder utama) dan apakah masih mengikuti bawaan jenis situs. */
   docRootRel: s.doc_root ?? defaultDocRootRel(s.kind),
   docRootAuto: s.doc_root === null,
+  isDefault: s.is_default === 1,
   envPath: s.kind === 'laravel' ? `${s.root_path}/.env` : null,
   createdAt: s.created_at,
 });
@@ -139,7 +142,7 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   /** Konfigurasi situs yang sedang berlaku (untuk rollback saat konfigurasi baru ditolak). */
   const confOf = (s: SiteRow): string =>
-    WEB_SERVERS[s.web_server].conf(s.domain, s.kind, s.php_version, s.doc_root);
+    WEB_SERVERS[s.web_server].conf(s.domain, s.kind, s.php_version, s.doc_root, s.is_default === 1);
 
   /**
    * Tulis konfigurasi, aktifkan, uji sintaks (nginx -t / apache2ctl configtest), dan rollback bila ditolak.
@@ -149,14 +152,20 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
     vm: VmRow,
     lease: Lease,
     server: WebServer,
-    s: { domain: string; kind: SiteKind; phpVersion: string | null; docRoot: string | null },
+    s: {
+      domain: string;
+      kind: SiteKind;
+      phpVersion: string | null;
+      docRoot: string | null;
+      isDefault?: boolean;
+    },
     previous?: string,
   ): Promise<void> {
     const ws = WEB_SERVERS[server];
     if (server === 'apache')
       await must(vm, lease, ['a2enmod', '-q', ...APACHE_MODULES], 'Mengaktifkan modul Apache');
     await must(vm, lease, ['tee', ws.available(s.domain)], `Menulis konfigurasi ${ws.title}`, {
-      stdin: ws.conf(s.domain, s.kind, s.phpVersion, s.docRoot),
+      stdin: ws.conf(s.domain, s.kind, s.phpVersion, s.docRoot, s.isDefault ?? false),
     });
     await must(
       vm,
@@ -355,7 +364,13 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
         vm,
         lease,
         site.web_server,
-        { domain: site.domain, kind: site.kind, phpVersion: v, docRoot: site.doc_root },
+        {
+          domain: site.domain,
+          kind: site.kind,
+          phpVersion: v,
+          docRoot: site.doc_root,
+          isDefault: site.is_default === 1,
+        },
         confOf(site),
       );
     });
@@ -411,12 +426,122 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
           vm,
           lease,
           site.web_server,
-          { domain: site.domain, kind: site.kind, phpVersion: site.php_version, docRoot: path },
+          {
+            domain: site.domain,
+            kind: site.kind,
+            phpVersion: site.php_version,
+            docRoot: path,
+            isDefault: site.is_default === 1,
+          },
           confOf(site),
         );
       });
       db.prepare('UPDATE sites SET doc_root = ? WHERE id = ?').run(path, site.id);
       rec(req, vm, userId, 'docroot', site.domain, 'ok', { from: site.doc_root, to: path });
+      return toPublic(loadSite(vm, site.id));
+    },
+  );
+
+  /**
+   * Jadikan situs ini "situs utama" Nginx (default_server) atau lepaskan. Tanpa ini, permintaan yang Host-nya bukan
+   * persis domain situs (mis. dibuka lewat IP VM) dijawab halaman bawaan "Welcome to nginx". Halaman bawaan hanya
+   * dinonaktifkan (symlink di sites-enabled dilepas, berkasnya tetap) dan dipulihkan saat situs utama dilepas.
+   */
+  app.post(
+    '/api/vms/:vmId/sites/:siteId/default',
+    { config: rateLimit(10), onRequest: requireActive },
+    async (req) => {
+      const { vm, userId } = access(req);
+      const { siteId } = siteParams.parse(req.params);
+      const site = loadSite(vm, siteId);
+      const { enabled } = z.object({ enabled: z.boolean() }).parse(req.body);
+      if (site.web_server !== 'nginx') {
+        throw new AppError(
+          400,
+          'default_unsupported',
+          'Pilihan situs utama baru tersedia untuk Nginx. Di Apache, nonaktifkan situs bawaan lewat Terminal (a2dissite 000-default lalu systemctl reload apache2).',
+        );
+      }
+      if ((site.is_default === 1) === enabled) return toPublic(site);
+      const STOCK_ON = '/etc/nginx/sites-enabled/default';
+      const STOCK_AVAILABLE = '/etc/nginx/sites-available/default';
+      const base = { domain: site.domain, kind: site.kind, phpVersion: site.php_version };
+
+      await withVm(ctx, vm, async (lease) => {
+        const stockWasLinked = (await exec(vm, lease, ['test', '-L', STOCK_ON])).code === 0;
+        const others = enabled
+          ? (db
+              .prepare('SELECT * FROM sites WHERE vm_id = ? AND is_default = 1 AND id != ?')
+              .all(vm.id, site.id) as SiteRow[])
+          : [];
+        try {
+          if (enabled) {
+            if (stockWasLinked)
+              await must(
+                vm,
+                lease,
+                ['rm', '-f', '--', STOCK_ON],
+                'Menonaktifkan halaman bawaan Nginx',
+              );
+            for (const o of others)
+              await applyWebServer(
+                vm,
+                lease,
+                'nginx',
+                {
+                  domain: o.domain,
+                  kind: o.kind,
+                  phpVersion: o.php_version,
+                  docRoot: o.doc_root,
+                  isDefault: false,
+                },
+                confOf(o),
+              );
+            await applyWebServer(
+              vm,
+              lease,
+              'nginx',
+              { ...base, docRoot: site.doc_root, isDefault: true },
+              confOf(site),
+            );
+          } else {
+            // Pulihkan halaman bawaan bila ada, supaya Nginx tetap punya server default.
+            const stockExists = (await exec(vm, lease, ['test', '-e', STOCK_AVAILABLE])).code === 0;
+            const stockLinked = (await exec(vm, lease, ['test', '-e', STOCK_ON])).code === 0;
+            if (stockExists && !stockLinked)
+              await must(
+                vm,
+                lease,
+                ['ln', '-sf', STOCK_AVAILABLE, STOCK_ON],
+                'Memulihkan halaman bawaan Nginx',
+              );
+            await applyWebServer(
+              vm,
+              lease,
+              'nginx',
+              { ...base, docRoot: site.doc_root, isDefault: false },
+              confOf(site),
+            );
+          }
+        } catch (e) {
+          // Kembalikan keadaan semula sebisanya: halaman bawaan dan konfigurasi situs lain.
+          if (enabled) {
+            if (stockWasLinked)
+              await exec(vm, lease, ['ln', '-sf', STOCK_AVAILABLE, STOCK_ON]).catch(() => {});
+            for (const o of others)
+              await exec(vm, lease, ['tee', WEB_SERVERS.nginx.available(o.domain)], {
+                stdin: confOf(o),
+              }).catch(() => {});
+          }
+          throw e;
+        }
+      });
+
+      db.transaction(() => {
+        if (enabled) db.prepare('UPDATE sites SET is_default = 0 WHERE vm_id = ?').run(vm.id);
+        db.prepare('UPDATE sites SET is_default = ? WHERE id = ?').run(enabled ? 1 : 0, site.id);
+      })();
+      rec(req, vm, userId, enabled ? 'default_on' : 'default_off', site.domain);
       return toPublic(loadSite(vm, site.id));
     },
   );
@@ -518,7 +643,13 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
         vm,
         lease,
         site.web_server,
-        { domain: site.domain, kind: site.kind, phpVersion: site.php_version, docRoot: pick },
+        {
+          domain: site.domain,
+          kind: site.kind,
+          phpVersion: site.php_version,
+          docRoot: pick,
+          isDefault: fresh.is_default === 1,
+        },
         confOf(fresh),
       );
       db.prepare('UPDATE sites SET doc_root = ? WHERE id = ?').run(pick, site.id);

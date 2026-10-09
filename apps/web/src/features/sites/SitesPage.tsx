@@ -6,6 +6,7 @@ import {
   Badge,
   Button,
   ButtonLink,
+  ConfirmDialog,
   EmptyState,
   Input,
   JobLog,
@@ -31,6 +32,8 @@ interface Site {
   /** Folder dokumen relatif ("." = folder utama) dan apakah masih mengikuti bawaan jenis situs. */
   docRootRel: string;
   docRootAuto: boolean;
+  /** Situs utama Nginx (default_server): melayani Host yang tidak cocok dengan domain mana pun. */
+  isDefault: boolean;
   envPath: string | null;
 }
 interface Options {
@@ -70,7 +73,10 @@ const ARTISAN = [
 ] as const;
 const RISKY_ARTISAN = new Set(['migrate', 'db:seed', 'key:generate']);
 
-type Dialog = { kind: 'deploy' | 'artisan' | 'php' | 'delete' | 'docroot'; site: Site } | null;
+type Dialog = {
+  kind: 'deploy' | 'artisan' | 'php' | 'delete' | 'docroot' | 'default';
+  site: Site;
+} | null;
 
 export function SitesPage() {
   const vmId = useVmId();
@@ -191,6 +197,23 @@ export function SitesPage() {
       setJobId(j.id);
       setDlUrl('');
       closeDialog();
+    },
+    onError: onErr,
+  });
+
+  // --- situs utama (Nginx default_server) ---
+  const setDefault = useMutation({
+    mutationFn: ({ site, enabled }: { site: Site; enabled: boolean }) =>
+      api<Site>(`${base}/sites/${site.id}/default`, { method: 'POST', body: { enabled } }),
+    onSuccess: async (s) => {
+      toast.show(
+        'success',
+        s.isDefault
+          ? `${s.domain} kini menjadi situs utama. Dibuka lewat IP VM, yang tampil situs ini.`
+          : `${s.domain} tidak lagi menjadi situs utama.`,
+      );
+      closeDialog();
+      await refresh();
     },
     onError: onErr,
   });
@@ -357,6 +380,7 @@ export function SitesPage() {
                 <Badge tone="info">{kindLabel[s.kind]}</Badge>
                 {s.phpVersion && <Badge tone="neutral">PHP {s.phpVersion}</Badge>}
                 <Badge tone="neutral">{serverLabel[s.webServer]}</Badge>
+                {s.isDefault && <Badge tone="success">Situs utama</Badge>}
               </span>
             </div>
             <p className="mt-1 break-all font-mono text-xs text-slate-500">{s.rootPath}</p>
@@ -364,6 +388,12 @@ export function SitesPage() {
               Folder dokumen: <code>{s.docRootRel === '.' ? '(folder utama)' : s.docRootRel}</code>
               {s.docRootAuto ? ' · bawaan' : ' · dipilih'}
             </p>
+            {s.webServer === 'nginx' && !s.isDefault && (
+              <p className="mt-1 text-xs text-slate-500">
+                Nginx memilih situs menurut nama domain. Dibuka lewat IP VM atau domain lain, yang
+                tampil halaman bawaan "Welcome to nginx", kecuali situs ini dijadikan situs utama.
+              </p>
+            )}
             <div className="mt-3 flex flex-wrap gap-2">
               <Button size="sm" onClick={() => setDialog({ kind: 'deploy', site: s })}>
                 Deploy kode
@@ -385,6 +415,15 @@ export function SitesPage() {
               >
                 Folder dokumen
               </Button>
+              {s.webServer === 'nginx' && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setDialog({ kind: 'default', site: s })}
+                >
+                  {s.isDefault ? 'Lepas situs utama' : 'Jadikan situs utama'}
+                </Button>
+              )}
               {s.envPath && (
                 <ButtonLink
                   variant="secondary"
@@ -731,6 +770,22 @@ export function SitesPage() {
           <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded-xl bg-[#0a0f1e] p-4 font-mono text-xs text-slate-200">{`[kode keluar ${artisanOut.code}]\n${artisanOut.output}`}</pre>
         )}
       </Modal>
+
+      <ConfirmDialog
+        open={dialog?.kind === 'default'}
+        title={dialog?.site.isDefault ? 'Lepas situs utama?' : 'Jadikan situs utama?'}
+        message={
+          dialog?.site.isDefault
+            ? `Situs ${dialog.site.domain} tidak lagi melayani permintaan yang domainnya tidak cocok. Halaman bawaan Nginx ("Welcome to nginx") diaktifkan kembali.`
+            : `Situs ${dialog?.site.domain ?? ''} akan melayani SEMUA permintaan yang domainnya tidak cocok dengan situs mana pun, misalnya dibuka lewat IP VM. Halaman bawaan Nginx ("Welcome to nginx") dinonaktifkan (berkasnya tidak dihapus). Hanya satu situs per VM yang bisa menjadi situs utama; yang lama dilepas otomatis.`
+        }
+        confirmLabel={dialog?.site.isDefault ? 'Lepas' : 'Jadikan situs utama'}
+        loading={setDefault.isPending}
+        onConfirm={() =>
+          dialog && setDefault.mutate({ site: dialog.site, enabled: !dialog.site.isDefault })
+        }
+        onCancel={closeDialog}
+      />
 
       <Modal
         open={dialog?.kind === 'docroot'}

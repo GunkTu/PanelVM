@@ -19,6 +19,7 @@ export interface WebServerSpec {
     kind: SiteKind,
     phpVersion: string | null,
     docRootRel?: string | null,
+    isDefault?: boolean,
   ): string;
 }
 

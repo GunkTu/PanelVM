@@ -35,12 +35,13 @@ export function nginxConf(
   kind: SiteKind,
   phpVersion: string | null,
   docRootRel?: string | null,
+  isDefault = false,
 ): string {
   if (!DOMAIN_RE.test(domain)) throw new Error('Domain tidak valid');
   if (kind !== 'static' && !(phpVersion && /^[5-9]\.\d$/.test(phpVersion)))
     throw new Error('Versi PHP tidak valid');
   const head = `server {
-    listen 80;
+    listen 80${isDefault ? ' default_server' : ''};
     server_name ${domain};
     root ${docRoot(domain, kind, docRootRel)};
     index index.php index.html;
