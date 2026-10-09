@@ -45,6 +45,7 @@ interface RawQemu {
 }
 interface RawStorage {
   storage: string;
+  shared?: number | boolean;
   type?: string;
   avail?: number;
   total?: number;
@@ -57,6 +58,35 @@ interface RawNetwork {
   type?: string;
 }
 
+export interface TemplateInfo {
+  vmid: number;
+  name: string;
+  os: TemplateOs;
+  /** Kunci disk utama di konfigurasi template (mis. scsi0), dan storage serta ukurannya. */
+  diskKey: string | null;
+  diskStorage: string | null;
+  diskSizeBytes: number | null;
+  /** Disk template ada di storage bersama sehingga bisa di-clone ke node mana pun. */
+  shared: boolean;
+}
+
+/** Disk utama dari konfigurasi VM: kunci, storage, dan ukuran (mis. "scsi0: tpl-smb:9000/base.qcow2,size=3G"). */
+export function parseMainDisk(
+  config: Record<string, unknown>,
+): { key: string; storage: string; sizeBytes: number | null } | null {
+  for (const key of ['scsi0', 'virtio0', 'sata0', 'ide0']) {
+    const v = config[key];
+    if (typeof v !== 'string' || v.includes('media=cdrom')) continue;
+    const storage = /^([A-Za-z0-9][A-Za-z0-9._-]*):/.exec(v)?.[1];
+    if (!storage) continue;
+    const m = /(?:^|,)size=([0-9]+(?:[.][0-9]+)?)([KMGT])/.exec(v);
+    const unit = { K: 1024, M: 1024 ** 2, G: 1024 ** 3, T: 1024 ** 4 } as const;
+    const sizeBytes = m ? Math.round(Number(m[1]) * unit[m[2] as keyof typeof unit]) : null;
+    return { key, storage, sizeBytes };
+  }
+  return null;
+}
+
 export interface NodeInventory {
   node: string;
   online: boolean;
@@ -64,10 +94,16 @@ export interface NodeInventory {
   cpuCores: number | null;
   memFreeBytes: number | null;
   memTotalBytes: number | null;
-  templates: { vmid: number; name: string; os: TemplateOs }[];
+  templates: TemplateInfo[];
   /** Jumlah template yang namanya tidak mengikuti pola Debian/Ubuntu (diabaikan). */
   ignoredTemplates: number;
-  storages: { name: string; type: string; availBytes: number | null; totalBytes: number | null }[];
+  storages: {
+    name: string;
+    type: string;
+    availBytes: number | null;
+    totalBytes: number | null;
+    shared: boolean;
+  }[];
   bridges: string[];
   error?: string;
 }
@@ -119,7 +155,16 @@ export async function collectInventory(client: ProxmoxClient): Promise<Inventory
         for (const vm of qemu.v) {
           if (!truthy(vm.template)) continue;
           const os = parseTemplateOs(vm.name ?? '');
-          if (os) base.templates.push({ vmid: vm.vmid, name: vm.name!, os });
+          if (os)
+            base.templates.push({
+              vmid: vm.vmid,
+              name: vm.name!,
+              os,
+              diskKey: null,
+              diskStorage: null,
+              diskSizeBytes: null,
+              shared: false,
+            });
           else base.ignoredTemplates += 1;
         }
         base.templates.sort((a, b) => a.name.localeCompare(b.name));
@@ -136,10 +181,26 @@ export async function collectInventory(client: ProxmoxClient): Promise<Inventory
             type: s.type ?? '',
             availBytes: s.avail ?? null,
             totalBytes: s.total ?? null,
+            shared: truthy(s.shared),
           }));
       } else errors.push(`storage: ${storage.error}`);
       if (net.ok) base.bridges = net.v.map((b) => b.iface).sort();
       else errors.push(`jaringan: ${net.error}`);
+      // Detail disk tiap template: menentukan apakah bisa di-clone ke node lain (disk di storage bersama).
+      await Promise.all(
+        base.templates.map(async (t) => {
+          const cfg = await safe(
+            client.get<Record<string, unknown>>(`/nodes/${n.node}/qemu/${t.vmid}/config`),
+          );
+          if (!cfg.ok) return;
+          const disk = parseMainDisk(cfg.v);
+          if (!disk) return;
+          t.diskKey = disk.key;
+          t.diskStorage = disk.storage;
+          t.diskSizeBytes = disk.sizeBytes;
+          t.shared = base.storages.find((st) => st.name === disk.storage)?.shared ?? false;
+        }),
+      );
       if (errors.length) base.error = errors.join('; ');
       return base;
     }),

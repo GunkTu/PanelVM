@@ -1,20 +1,20 @@
 # Proxmox: membuat VM dari panel
 
-Panel bisa terhubung ke API Proxmox (satu cluster atau satu server) agar admin dapat melihat node, template, storage, dan bridge, lalu (tahap berikutnya) membuat VM dari template. **Panel tidak pernah menghapus apa pun di Proxmox**: klien API panel hanya boleh memanggil daftar endpoint tertentu (lihat `ALLOWED_CALLS` di `apps/server/src/modules/proxmox/api.ts`), tanpa `DELETE` dan tanpa endpoint penghapusan. Penghapusan VM dilakukan admin langsung di Proxmox.
+Panel bisa terhubung ke API Proxmox (satu cluster atau satu server) agar admin dapat melihat node, template, storage, dan bridge, lalu membuat VM dari template. **Panel tidak pernah menghapus apa pun di Proxmox**: klien API panel hanya boleh memanggil daftar endpoint tertentu (lihat `ALLOWED_CALLS` di `apps/server/src/modules/proxmox/api.ts`), tanpa `DELETE` dan tanpa endpoint penghapusan. Penghapusan VM dilakukan admin langsung di Proxmox.
 
 ## Status
 
 | Tahap | Isi | Status |
 | --- | --- | --- |
 | A | Koneksi, pin sertifikat, tes koneksi, daftar node/template/storage/bridge, periksa hak token. **Hanya membaca.** | Selesai |
-| B | Wizard Buat VM (clone template, isi cloud-init, nyalakan, daftarkan ke panel) | Berikutnya |
+| B | Wizard Buat VM (clone template, isi cloud-init, nyalakan, daftarkan ke panel) | Selesai (belum diuji di Proxmox nyata) |
 | C | Tombol nyalakan, matikan, reboot | Setelah B |
 
 **[belum diuji di Proxmox 8.4 nyata]**: panel diuji dengan server Proxmox tiruan (HTTPS, pin sertifikat, token). Nama hak akses di bawah mengikuti dokumentasi Proxmox VE 8; tombol **Tes** di halaman Proxmox memeriksanya dan memberi saran. Jalankan Tes dulu sebelum mempercayai konfigurasi ini.
 
 ## 1. Firewall
 
-VM/CT panel harus bisa menjangkau **port 8006 di setiap node** Proxmox. VM client **tidak boleh** menjangkau port itu (aturan keamanan proyek). Tidak ada port lain yang dibutuhkan untuk Tahap A.
+VM/CT panel harus bisa menjangkau **port 8006 di setiap node** Proxmox. VM client **tidak boleh** menjangkau port itu (aturan keamanan proyek). Tahap B juga membutuhkan VM panel menjangkau **VM baru di port SSH-nya** (bawaan 22) untuk menunggu SSH hidup dan membaca host key; VM client tetap tidak boleh menjangkau VM panel.
 
 ## 2. Token API dengan hak minimal
 
@@ -107,6 +107,32 @@ qm template 9010
 
 Bila sertifikat sebuah node diganti, panel menolak dengan pesan "Sertifikat ... berbeda dari yang Anda konfirmasi" (ini juga tanda kemungkinan penyamaran). Periksa node itu, lalu perbarui pin.
 
-## 5. CT (LXC)
+## 5. Membuat VM (Admin, Proxmox, Buat VM)
+
+Klik **Buat VM** pada koneksi. Pilihan di wizard datang langsung dari Proxmox: node yang online (dengan CPU dan RAM bebas), OS yang template-nya tersedia di node itu, storage, dan bridge. Server memeriksa ulang semuanya sebelum bekerja (node online, template, storage, bridge, ukuran disk, subnet IP dan gateway, nama dan IP belum dipakai VM lain).
+
+Panel lalu menjalankan job berlog:
+
+1. Meminta nomor VM kosong dari Proxmox (`/cluster/nextid`).
+2. **Clone penuh** template ke storage pilihan, ditaruh di pool `panel`. Template di storage bersama (mis. `tpl-smb`) bisa di-clone ke node mana pun; template di storage lokal hanya untuk node pemiliknya.
+3. Mengisi cloud-init: CPU, RAM, user (`debian` atau `ubuntu`), kunci SSH publik khusus VM itu, `ipconfig0` (IP, gateway), DNS, dan bridge/VLAN.
+4. Memperbesar disk ke ukuran pilihan (disk hanya bisa diperbesar), lalu menyalakan VM.
+5. Menunggu port SSH menjawab, lalu membaca host key.
+
+Setelah job selesai: buka **Admin, Kelola VM**, pindai dan setujui host key VM (fingerprint ditampilkan di log), lalu hubungkan VM ke client. VM langsung terdaftar di panel dengan semua modul aktif.
+
+**Yang tidak pernah dilakukan panel:** menghapus, mematikan, atau memigrasi VM di Proxmox. Bila job gagal di tengah, log menyebut node dan nomor VM yang sudah ada di Proxmox dan meminta Anda memeriksa atau menghapusnya manual. Bila gagal sebelum clone selesai, tidak ada VM di Proxmox dan catatan di panel bisa dihapus lewat Kelola VM. Menghapus catatan VM di panel tidak menyentuh Proxmox; koneksi yang masih dipakai VM tidak bisa dihapus catatannya.
+
+**Satu pembuatan pada satu waktu per koneksi** (agar nomor VM dan clone tidak berebut).
+
+**[belum diuji di Proxmox 8.4 nyata]**: urutan dan isi panggilan diuji dengan server Proxmox tiruan. Hal yang baru terbukti saat VM uji pertama dibuat:
+
+- Clone lintas node dari storage bersama ke `local-lvm` node lain (mungkin butuh hak tambahan seperti `VM.Migrate`; pesan galat 403 menyebut path dan hak yang kurang).
+- Format nilai `sshkeys` (dikirim ter-URL-encode sekali, sesuai dokumentasi API) dan user cloud-init bawaan image.
+- Disk cloud-init (`ide2`) di template tertaut ke `local-lvm` node pemilik; pada clone ke node lain Proxmox seharusnya membuatnya ulang di storage tujuan.
+- Perilaku jaringan: VM panel harus bisa menjangkau IP VM baru agar langkah "menunggu SSH" berhasil.
+
+Uji pertama yang disarankan: buat satu VM kecil (1 CPU, 1 GB RAM, disk 8 GB) di node yang sama dengan template, lalu satu lagi lintas node.
+## 6. CT (LXC)
 
 Tahap ini untuk **VM (QEMU)**. Dukungan CT (LXC) direncanakan menyusul; alurnya lebih sederhana (tanpa cloud-init, memakai template CT resmi) tetapi isolasinya lebih lemah daripada VM, jadi hanya CT unprivileged yang akan dibuat.

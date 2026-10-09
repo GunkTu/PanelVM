@@ -13,6 +13,7 @@ import {
 } from '../../components';
 import { api } from '../../lib/api';
 import { formatBytes, formatTime } from '../../lib/format';
+import { ProxmoxCreateVm } from './ProxmoxCreateVm';
 
 interface Endpoint {
   url: string;
@@ -378,6 +379,7 @@ export function AdminProxmoxPage() {
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<Connection | null>(null);
   const [result, setResult] = useState<TestResult | null>(null);
+  const [creatingFor, setCreatingFor] = useState<Connection | null>(null);
 
   const test = useMutation({
     mutationFn: (c: Connection) =>
@@ -403,7 +405,7 @@ export function AdminProxmoxPage() {
       <PageHeader
         icon={<Cloud className="h-5 w-5" />}
         title="Proxmox"
-        description="Hubungkan panel ke Proxmox (satu cluster atau server) agar VM bisa dibuat dari panel. Tahap ini hanya membaca: panel tidak mengubah atau menghapus apa pun di Proxmox."
+        description="Hubungkan panel ke Proxmox (satu cluster atau server) agar VM bisa dibuat dari panel. Panel hanya membuat dan menyalakan VM dari template; panel tidak pernah menghapus atau mematikan apa pun di Proxmox."
         actions={
           <Button icon={<Plus className="h-4 w-4" />} onClick={() => setAdding(true)}>
             Tambah koneksi
@@ -445,6 +447,9 @@ export function AdminProxmoxPage() {
                   >
                     Tes
                   </Button>
+                  <Button size="sm" variant="secondary" onClick={() => setCreatingFor(c)}>
+                    Buat VM
+                  </Button>
                   <Button
                     size="sm"
                     variant="ghost"
@@ -461,6 +466,7 @@ export function AdminProxmoxPage() {
       </div>
 
       <AddConnection open={adding} onClose={() => setAdding(false)} />
+      <ProxmoxCreateVm connection={creatingFor} onClose={() => setCreatingFor(null)} />
 
       <Modal
         open={!!result}

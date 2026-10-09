@@ -23,6 +23,8 @@ export type HttpMethod = 'GET' | 'POST' | 'PUT';
  * di Proxmox (penghapusan dilakukan admin langsung di Proxmox).
  */
 const NODE = '[A-Za-z0-9][A-Za-z0-9-]{0,62}';
+/** ID tugas Proxmox (UPID:node:pid:pstart:starttime:type:id:user@realm!token:). */
+const UPID = 'UPID:[A-Za-z0-9:@!._-]{10,300}';
 export const ALLOWED_CALLS: readonly { method: HttpMethod; path: RegExp }[] = [
   { method: 'GET', path: /^\/version$/ },
   { method: 'GET', path: /^\/nodes$/ },
@@ -30,6 +32,13 @@ export const ALLOWED_CALLS: readonly { method: HttpMethod; path: RegExp }[] = [
   { method: 'GET', path: new RegExp(`^/nodes/${NODE}/qemu/\\d{1,9}/config$`) },
   { method: 'GET', path: /^\/cluster\/nextid$/ },
   { method: 'GET', path: /^\/access\/permissions$/ },
+  // --- Tahap B: membuat VM dari template. Tidak ada stop/shutdown/reboot/delete/migrate. ---
+  { method: 'GET', path: new RegExp(`^/nodes/${NODE}/qemu/\\d{1,9}/status/current$`) },
+  { method: 'GET', path: new RegExp(`^/nodes/${NODE}/tasks/${UPID}/status$`) },
+  { method: 'POST', path: new RegExp(`^/nodes/${NODE}/qemu/\\d{1,9}/clone$`) },
+  { method: 'PUT', path: new RegExp(`^/nodes/${NODE}/qemu/\\d{1,9}/config$`) },
+  { method: 'PUT', path: new RegExp(`^/nodes/${NODE}/qemu/\\d{1,9}/resize$`) },
+  { method: 'POST', path: new RegExp(`^/nodes/${NODE}/qemu/\\d{1,9}/status/start$`) },
 ];
 
 export function isAllowedCall(method: string, path: string): boolean {
@@ -136,6 +145,15 @@ export class ProxmoxClient {
 
   async get<T>(path: string, query: Record<string, string | number> = {}): Promise<T> {
     return this.call<T>('GET', path, query);
+  }
+
+  /** POST dengan isian form (hanya path yang ada di ALLOWED_CALLS). */
+  async post<T>(path: string, form: Record<string, string | number> = {}): Promise<T> {
+    return this.call<T>('POST', path, {}, form);
+  }
+
+  async put<T>(path: string, form: Record<string, string | number> = {}): Promise<T> {
+    return this.call<T>('PUT', path, {}, form);
   }
 
   async call<T>(

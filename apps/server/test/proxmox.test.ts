@@ -73,13 +73,24 @@ describe('daftar panggilan yang diizinkan', () => {
     expect(isAllowedCall('GET', '/nodes')).toBe(true);
     expect(isAllowedCall('GET', '/nodes/pve1/qemu')).toBe(true);
     expect(isAllowedCall('GET', '/nodes/pve1/qemu/100/config')).toBe(true);
+    // Tahap B: hanya yang dibutuhkan untuk membuat VM
+    expect(isAllowedCall('POST', '/nodes/pve1/qemu/9000/clone')).toBe(true);
+    expect(isAllowedCall('PUT', '/nodes/pve1/qemu/200/config')).toBe(true);
+    expect(isAllowedCall('PUT', '/nodes/pve1/qemu/200/resize')).toBe(true);
+    expect(isAllowedCall('POST', '/nodes/pve1/qemu/200/status/start')).toBe(true);
     for (const [m, p] of [
       ['DELETE', '/nodes/pve1/qemu/100'],
       ['DELETE', '/nodes/pve1/lxc/100'],
       ['GET', '/nodes/pve1/qemu/100'],
       ['POST', '/nodes/pve1/qemu/100/status/stop'],
-      ['POST', '/nodes/pve1/qemu/100/status/start'],
-      ['PUT', '/nodes/pve1/qemu/100/config'],
+      ['POST', '/nodes/pve1/qemu/100/status/stop'],
+      ['POST', '/nodes/pve1/qemu/100/status/shutdown'],
+      ['POST', '/nodes/pve1/qemu/100/status/reboot'],
+      ['POST', '/nodes/pve1/qemu'],
+      ['POST', '/nodes/pve1/qemu/100/migrate'],
+      ['PUT', '/nodes/pve1/qemu/100/status/start'],
+      ['DELETE', '/nodes/pve1/qemu/100/config'],
+      ['GET', '/nodes/pve1/qemu/100/status/start'],
       ['GET', '/nodes/../version'],
       ['GET', '/nodes/pve1/qemu/abc/config'],
       ['GET', '/access/users'],
@@ -303,7 +314,7 @@ describe.skipIf(!hasOpenssl)('klien dan rute dengan server Proxmox tiruan (HTTPS
       ]);
       expect(pve1.ignoredTemplates).toBe(1); // tpl-centos9
       expect(pve1.storages).toEqual([
-        { name: 'local-lvm', type: 'lvmthin', availBytes: 50e9, totalBytes: 100e9 },
+        { name: 'local-lvm', type: 'lvmthin', availBytes: 50e9, totalBytes: 100e9, shared: false },
       ]);
       expect(pve1.bridges).toEqual(['vmbr0', 'vmbr1']);
       expect(pve1.cpuPercent).toBe(25);
