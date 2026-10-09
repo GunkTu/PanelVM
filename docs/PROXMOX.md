@@ -27,21 +27,35 @@ pveum user add panel@pve --comment "Panel VM"
 pveum user token add panel@pve panel --privsep 1
 ```
 
-Catat **Token ID** (`panel@pve!panel`) dan **secret** dari keluaran terakhir. Lalu beri hak pada token (bukan pada user):
+Catat **Token ID** (`panel@pve!panel`) dan **secret** dari keluaran terakhir.
+
+**Hak harus diberikan ke user DAN token.** Token ber-_privilege separation_ (bawaan) hanya punya hak yang ada di kedua sisi: hak efektifnya adalah irisan hak token dan hak user `panel@pve`. Bila hanya salah satu yang diberi hak, Tes di panel menampilkan semua daftar kosong. Satu perintah per kali:
 
 ```
+pveum acl modify /pool/panel --users panel@pve --roles PanelVM
+pveum acl modify /storage/local-lvm --users panel@pve --roles PanelVM
+pveum acl modify /sdn/zones/localnetwork --users panel@pve --roles PanelVM
+pveum acl modify /nodes --users panel@pve --roles PVEAuditor
 pveum acl modify /pool/panel --tokens 'panel@pve!panel' --roles PanelVM
 pveum acl modify /storage/local-lvm --tokens 'panel@pve!panel' --roles PanelVM
 pveum acl modify /sdn/zones/localnetwork --tokens 'panel@pve!panel' --roles PanelVM
 pveum acl modify /nodes --tokens 'panel@pve!panel' --roles PVEAuditor
 ```
 
-Setiap template juga perlu hak clone (ganti nomornya sesuai template Anda, lihat bagian 3):
+Setiap template juga perlu hak clone untuk user dan token, begitu pula storage bersama bila template disimpan di sana (ganti nomor dan nama sesuai template Anda, lihat bagian 3):
 
 ```
+pveum acl modify /vms/9000 --users panel@pve --roles PanelVM
 pveum acl modify /vms/9000 --tokens 'panel@pve!panel' --roles PanelVM
+pveum acl modify /storage/tpl-smb --users panel@pve --roles PanelVM
+pveum acl modify /storage/tpl-smb --tokens 'panel@pve!panel' --roles PanelVM
 ```
 
+Cek hak efektif token (semua yang dibutuhkan harus muncul):
+
+```
+pveum user permissions 'panel@pve!panel'
+```
 Catatan keamanan:
 
 - Hak membuat VM (`VM.Allocate`) di Proxmox juga mencakup menghapus VM; tidak ada hak "buat tetapi tidak boleh hapus". Larangan hapus ditegakkan oleh kode panel (dan test yang gagal bila ada `DELETE`), bukan oleh Proxmox. Karena itu token dibatasi ke satu pool `panel`: hanya VM di pool itu yang bisa disentuh.

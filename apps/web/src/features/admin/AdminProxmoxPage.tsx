@@ -246,6 +246,25 @@ function TestPanel({ result }: { result: TestResult }) {
         Ditemukan {inventory.nodes.length} node. Pemeriksaan ini hanya membaca; tidak ada yang
         diubah di Proxmox.
       </p>
+      {inventory.nodes.some(
+        (n) =>
+          n.online && n.cpuPercent == null && n.storages.length === 0 && n.bridges.length === 0,
+      ) && (
+        <div
+          role="alert"
+          className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-amber-950"
+        >
+          <p className="font-medium">Daftar node kosong: token belum punya hak membaca</p>
+          <p className="mt-1">
+            Koneksi dan sertifikat sudah benar, tetapi Proxmox tidak menampilkan isi node (CPU/RAM{' '}
+            <code>?</code>, tanpa storage, bridge, atau template). Penyebab paling umum: hak belum
+            diberikan ke <strong>user dan token sekaligus</strong>. Hak efektif token adalah irisan
+            hak user <code>panel@pve</code> dan hak token-nya sendiri. Jalankan perintah{' '}
+            <code>pveum acl modify ... --users panel@pve</code> dan <code>--tokens</code> di
+            docs/PROXMOX.md bagian 2, lalu klik Tes lagi.
+          </p>
+        </div>
+      )}
       <div className="grid gap-3 md:grid-cols-2">
         {inventory.nodes.map((n) => (
           <div key={n.node} className="rounded-xl border border-slate-200 p-3">

@@ -132,6 +132,7 @@ describe.skipIf(!hasOpenssl)('klien dan rute dengan server Proxmox tiruan (HTTPS
         ].map((p) => [p, 1]),
       ),
       '/storage/local-lvm': { 'Datastore.AllocateSpace': 1 },
+      '/nodes': { 'Sys.Audit': 1 },
       '/vms/9000': {}, // sengaja kurang: tidak ada VM.Clone
       '/vms/9010': { 'VM.Clone': 1 },
     };

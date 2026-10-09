@@ -163,6 +163,7 @@ export const REQUIRED_PRIVILEGES = {
   storage: ['Datastore.AllocateSpace'],
   template: ['VM.Clone'],
   network: ['SDN.Use'],
+  nodes: ['Sys.Audit'],
 } as const;
 
 export interface PermissionCheck {
@@ -189,6 +190,11 @@ export async function checkPermissions(
       path: '/sdn/zones/localnetwork',
       purpose: 'jaringan bridge',
       need: REQUIRED_PRIVILEGES.network,
+    },
+    {
+      path: '/nodes',
+      purpose: 'membaca node, storage, dan jaringan',
+      need: REQUIRED_PRIVILEGES.nodes,
     },
   ];
   const seen = new Set<string>();
