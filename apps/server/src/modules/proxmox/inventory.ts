@@ -66,8 +66,36 @@ export interface TemplateInfo {
   diskKey: string | null;
   diskStorage: string | null;
   diskSizeBytes: number | null;
-  /** Disk template ada di storage bersama sehingga bisa di-clone ke node mana pun. */
+  /** Disk utama template ada di storage bersama (mis. share SMB). */
   shared: boolean;
+  /** Disk cloud-init di template (kunci dan storage), atau null bila template tidak punya. */
+  cloudinit: { key: string; storage: string } | null;
+  /** Kunci IDE yang masih kosong, tempat panel menambah disk cloud-init bila template tidak punya. */
+  freeIdeKey: string | null;
+  /**
+   * Semua volume template ada di storage bersama. Hanya dengan begitu Proxmox mau meng-clone template ke node lain
+   * ("can't clone VM to node ... (VM uses local storage)" bila ada satu saja di storage lokal).
+   */
+  cloneableAcrossNodes: boolean;
+}
+
+/** Volume (disk/ISO/cloud-init) di konfigurasi VM: kunci, storage, dan apakah itu disk cloud-init. */
+export function parseVolumes(
+  config: Record<string, unknown>,
+): { key: string; storage: string; cloudinit: boolean }[] {
+  const out: { key: string; storage: string; cloudinit: boolean }[] = [];
+  for (const [key, v] of Object.entries(config)) {
+    if (!/^(?:ide|sata|scsi|virtio)[0-9]+$|^(?:efidisk|tpmstate)[0-9]+$/.test(key)) continue;
+    if (typeof v !== 'string') continue;
+    const storage = /^([A-Za-z0-9][A-Za-z0-9._-]*):/.exec(v)?.[1];
+    if (!storage) continue; // mis. "none" atau cdrom kosong
+    out.push({
+      key,
+      storage,
+      cloudinit: v.includes('cloudinit'),
+    });
+  }
+  return out;
 }
 
 /** Disk utama dari konfigurasi VM: kunci, storage, dan ukuran (mis. "scsi0: tpl-smb:9000/base.qcow2,size=3G"). */
@@ -168,6 +196,9 @@ export async function collectInventory(client: ProxmoxClient): Promise<Inventory
               diskStorage: null,
               diskSizeBytes: null,
               shared: false,
+              cloudinit: null,
+              freeIdeKey: null,
+              cloneableAcrossNodes: false,
             });
           else base.ignoredTemplates += 1;
         }
@@ -202,7 +233,14 @@ export async function collectInventory(client: ProxmoxClient): Promise<Inventory
           t.diskKey = disk.key;
           t.diskStorage = disk.storage;
           t.diskSizeBytes = disk.sizeBytes;
-          t.shared = base.storages.find((st) => st.name === disk.storage)?.shared ?? false;
+          const isShared = (name: string) =>
+            base.storages.find((st) => st.name === name)?.shared ?? false;
+          t.shared = isShared(disk.storage);
+          const vols = parseVolumes(cfg.v);
+          const ci = vols.find((v) => v.cloudinit);
+          t.cloudinit = ci ? { key: ci.key, storage: ci.storage } : null;
+          t.freeIdeKey = ['ide2', 'ide3', 'ide0', 'ide1'].find((k) => !(k in cfg.v)) ?? null;
+          t.cloneableAcrossNodes = vols.length > 0 && vols.every((v) => isShared(v.storage));
         }),
       );
       if (errors.length) base.error = errors.join('; ');

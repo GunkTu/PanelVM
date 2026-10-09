@@ -112,7 +112,13 @@ describe('parseMainDisk', () => {
 });
 
 describe('templatesOnNode dan templateSetupHints', () => {
-  const tpl = (vmid: number, osId: string, shared: boolean) => ({
+  const tpl = (
+    vmid: number,
+    osId: string,
+    shared: boolean,
+    cloudinit: { key: string; storage: string } | null = null,
+    cloneable = shared,
+  ) => ({
     vmid,
     name: `tpl-${osId}`,
     os: { id: osId, label: osId, sshUser: 'debian' as const },
@@ -120,6 +126,9 @@ describe('templatesOnNode dan templateSetupHints', () => {
     diskStorage: 's',
     diskSizeBytes: 1,
     shared,
+    cloudinit,
+    freeIdeKey: cloudinit ? null : 'ide2',
+    cloneableAcrossNodes: cloneable,
   });
   const node = (name: string, online: boolean, templates: ReturnType<typeof tpl>[]) => ({
     node: name,
@@ -162,6 +171,36 @@ describe('templatesOnNode dan templateSetupHints', () => {
       'qm clone 1 5 --name tpl-debian12-c --full 1 --storage s --target c --pool panel',
       'pvesh create /nodes/c/qemu/5/template',
     ]);
+  });
+
+  it('disk cloud-init di storage lokal menghalangi clone antar node: perintah hapus disambung sekali per OS', () => {
+    const withLocalCi: Inventory = {
+      version: '8',
+      nodes: [
+        node('a', true, [tpl(1, 'debian12', true, { key: 'ide2', storage: 'local-lvm' }, false)]),
+        node('b', true, []),
+        node('c', true, []),
+      ],
+    };
+    const hints = templateSetupHints(withLocalCi, 'panel');
+    expect(hints.map((h) => h.node)).toEqual(['b', 'c']);
+    expect(hints[0]!.commands).toEqual([
+      'qm set 1 --delete ide2',
+      'qm clone 1 2 --name tpl-debian12-b --full 1 --storage s --target b --pool panel',
+      'pvesh create /nodes/b/qemu/2/template',
+    ]);
+    // hanya hint pertama membawa langkah persiapan; yang kedua tidak mengulanginya
+    expect(hints[1]!.commands[0]).toMatch(/^qm clone 1 3 /);
+  });
+
+  it('template dengan disk lain di storage lokal tidak bisa disalin otomatis: ditandai blocked', () => {
+    const blocked: Inventory = {
+      version: '8',
+      nodes: [node('a', true, [tpl(1, 'debian12', true, null, false)]), node('b', true, [])],
+    };
+    const [h] = templateSetupHints(blocked, 'panel');
+    expect(h!.commands).toEqual([]);
+    expect(h!.blocked).toMatch(/disk lain di storage lokal/);
   });
 
   it('petunjuk tidak pernah memakai nomor yang sudah dipakai atau nama tidak aman', () => {
@@ -275,6 +314,7 @@ describe.skipIf(!hasOpenssl)('membuat VM dari panel (Proxmox dan SSH tiruan)', (
         node: 'pve2',
         osId: 'debian12',
         commands: [
+          'qm set 9000 --delete ide2', // disk cloud-init template ada di local-lvm sehingga menghalangi clone antar node
           'qm clone 9000 9001 --name tpl-debian12-pve2 --full 1 --storage tpl-smb --target pve2 --pool panel',
           'pvesh create /nodes/pve2/qemu/9001/template',
         ],
@@ -324,6 +364,7 @@ describe.skipIf(!hasOpenssl)('membuat VM dari panel (Proxmox dan SSH tiruan)', (
       pool: 'panel',
     });
     expect(clone!.form.target).toBeUndefined(); // tidak pernah lintas node
+    expect(config!.form.ide2).toBeUndefined(); // template Debian sudah punya disk cloud-init
     expect(config!.form).toMatchObject({
       cores: '2',
       memory: '2048',
@@ -393,6 +434,8 @@ describe.skipIf(!hasOpenssl)('membuat VM dari panel (Proxmox dan SSH tiruan)', (
     const config = fake.requests.find((r) => r.path.endsWith('/config') && r.method === 'PUT')!;
     expect(config.form.ciuser).toBe('ubuntu');
     expect(config.form.net0).toBe('virtio,bridge=vmbr0'); // tanpa VLAN
+    // template Ubuntu tanpa disk cloud-init: panel menambahkannya di storage VM
+    expect(config.form.ide2).toBe('local-lvm:cloudinit');
     expect(config.form.nameserver).toBeUndefined();
     expect(ctx.db.prepare('SELECT ssh_user FROM vms WHERE id = ?').get(vmId)).toEqual({
       ssh_user: 'ubuntu',

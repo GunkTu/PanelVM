@@ -143,10 +143,8 @@ export async function startFakePve(
             ide2: 'local-lvm:vm-9000-cloudinit,media=cdrom',
           });
         if (m[2] === '9011')
-          return send(200, {
-            scsi0: 'local-lvm:base-9011-disk-0,size=3584M',
-            ide2: 'local-lvm:vm-9011-cloudinit,media=cdrom',
-          });
+          // sengaja tanpa disk cloud-init: panel yang menambahkannya saat membuat VM
+          return send(200, { scsi0: 'local-lvm:base-9011-disk-0,size=3584M' });
         return send(404);
       }
       if (/^\/nodes\/pve[12]\/storage$/.test(path))

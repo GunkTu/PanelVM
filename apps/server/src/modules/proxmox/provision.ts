@@ -141,7 +141,10 @@ export interface SetupHint {
   fromNode: string;
   newVmid: number;
   name: string;
+  /** Perintah berurutan; bila kosong, lihat `blocked`. */
   commands: string[];
+  /** Alasan template tidak bisa disalin otomatis (mis. punya disk lain di storage lokal). */
+  blocked?: string;
 }
 
 const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -162,6 +165,17 @@ export function templateSetupHints(inv: Inventory, pool: string): SetupHint[] {
   const hints: SetupHint[] = [];
   for (const [osId, { t, owner }] of sharedByOs) {
     if (!SAFE_NAME.test(t.diskStorage!) || !SAFE_NAME.test(pool)) continue;
+    // Proxmox menolak meng-clone ke node lain bila ada satu volume saja di storage lokal. Yang umum: disk cloud-init
+    // di template tertaut ke local-lvm. Panel menambah disk cloud-init sendiri saat membuat VM, jadi cukup dihapus.
+    const prep =
+      !t.cloneableAcrossNodes && t.cloudinit && SAFE_NAME.test(t.cloudinit.key)
+        ? [`qm set ${t.vmid} --delete ${t.cloudinit.key}`]
+        : [];
+    const blocked =
+      !t.cloneableAcrossNodes && prep.length === 0
+        ? 'Template ini punya disk lain di storage lokal, jadi Proxmox tidak mau meng-clone-nya ke node lain. Pindahkan semua disk template ke storage bersama, atau buat template di node itu dari image (lihat docs/PROXMOX.md).'
+        : undefined;
+    let first = true;
     for (const n of online) {
       if (n.node === owner || n.templates.some((x) => x.os.id === osId) || !SAFE_NAME.test(n.node))
         continue;
@@ -176,11 +190,16 @@ export function templateSetupHints(inv: Inventory, pool: string): SetupHint[] {
         fromNode: owner,
         newVmid: id,
         name,
-        commands: [
-          `qm clone ${t.vmid} ${id} --name ${name} --full 1 --storage ${t.diskStorage} --target ${n.node} --pool ${pool}`,
-          `pvesh create /nodes/${n.node}/qemu/${id}/template`,
-        ],
+        commands: blocked
+          ? []
+          : [
+              ...(first ? prep : []),
+              `qm clone ${t.vmid} ${id} --name ${name} --full 1 --storage ${t.diskStorage} --target ${n.node} --pool ${pool}`,
+              `pvesh create /nodes/${n.node}/qemu/${id}/template`,
+            ],
+        ...(blocked ? { blocked } : {}),
       });
+      first = false;
     }
   }
   return hints;
@@ -219,6 +238,12 @@ export function planCreate(ctx: Ctx, inv: Inventory, input: CreateVmInput): Plan
       409,
       'template_unreadable',
       `Disk template ${template.name} tidak terbaca. Periksa hak token pada /vms/${template.vmid} lalu jalankan Tes lagi.`,
+    );
+  if (!template.cloudinit && !template.freeIdeKey)
+    throw new AppError(
+      409,
+      'template_no_ide',
+      `Template ${template.name} tidak punya disk cloud-init dan semua slot IDE-nya terpakai. Kosongkan satu slot IDE di template, atau buat ulang template.`,
     );
   const storage = node.storages.find((s) => s.name === input.storage);
   if (!storage)
@@ -379,6 +404,8 @@ export async function provisionVm(d: ProvisionDeps): Promise<void> {
       // Proxmox meminta nilai sshkeys yang sudah di-URL-encode (di atas encoding form).
       sshkeys: encodeURIComponent(vm.ssh_public_key.trim()),
       ipconfig0: plan.ipconfig0,
+      // Template tanpa disk cloud-init: panel menambahkannya di storage VM (di node yang sama).
+      ...(tpl.cloudinit ? {} : { [tpl.freeIdeKey!]: `${input.storage}:cloudinit` }),
       net0: `virtio,bridge=${input.bridge}${input.vlan ? `,tag=${input.vlan}` : ''}`,
       ...(plan.nameserver ? { nameserver: plan.nameserver } : {}),
     });

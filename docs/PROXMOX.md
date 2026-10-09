@@ -66,6 +66,15 @@ Catatan keamanan:
 
 Storage VM Anda `local-lvm` per node (tidak dipakai bersama), jadi template harus ada **di setiap node tempat VM akan dibuat**: Proxmox hanya mengizinkan clone lintas node ke storage bersama, sehingga VM di `local-lvm` harus di-clone dari template di node yang sama. Disk template sendiri boleh di storage bersama (mis. share SMB `tpl-smb`).
 
+**Template tanpa disk cloud-init.** Perintah di bawah sengaja tidak menambahkan disk cloud-init (`--ide2 ...:cloudinit`) ke template: panel menambahkannya sendiri di storage VM saat membuat VM. Alasannya, Proxmox menolak meng-clone template ke node lain bila ada satu saja volumenya di storage lokal ("can't clone VM to node ... (VM uses local storage)"), dan disk cloud-init di `local-lvm` termasuk. Bila template Anda sudah punya disk itu, hapus (aman; hanya disk cloud-init kecil yang dibuat ulang otomatis): `qm set 9000 --delete ide2`.
+
+**Template di storage bersama (share SMB `tpl-smb`).** Bila disk template ingin disimpan di share, ganti `local-lvm` dengan `tpl-smb` pada dua langkah ini (dan tambahkan `--format qcow2` pada import), lalu lanjutkan seperti biasa. Pesan `chattr: Operation not supported` saat `qm template` boleh diabaikan (SMB tidak mendukung penguncian berkas; periksa `qm config` memuat `template: 1`). Jangan menulis apa pun di folder template pada share.
+
+```
+qm disk import $ID <file-image> tpl-smb --format qcow2
+qm set $ID --scsi0 tpl-smb:$ID/vm-$ID-disk-0.qcow2 --boot order=scsi0 --serial0 socket --vga serial0
+```
+
 **Cara cepat untuk node lain** bila Anda sudah punya template dengan disk di storage bersama (mis. di PxThegt): salin lewat storage bersama, lalu jadikan template. Halaman Buat VM dan Tes menampilkan perintah yang pas untuk node Anda. Bentuknya (di Shell node pemilik template, satu perintah per kali):
 
 ```
@@ -94,7 +103,7 @@ cd /var/tmp
 wget https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
 qm create 9000 --name tpl-debian12-<node> --memory 2048 --cores 2 --net0 virtio,bridge=vmbr0 --scsihw virtio-scsi-pci
 qm disk import 9000 debian-12-generic-amd64.qcow2 local-lvm
-qm set 9000 --scsi0 local-lvm:vm-9000-disk-0 --ide2 local-lvm:cloudinit --boot order=scsi0 --serial0 socket --vga serial0
+qm set 9000 --scsi0 local-lvm:vm-9000-disk-0 --boot order=scsi0 --serial0 socket --vga serial0
 qm template 9000
 ```
 
@@ -105,7 +114,7 @@ cd /var/tmp
 wget https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
 qm create 9010 --name tpl-ubuntu2404-<node> --memory 2048 --cores 2 --net0 virtio,bridge=vmbr0 --scsihw virtio-scsi-pci
 qm disk import 9010 noble-server-cloudimg-amd64.img local-lvm
-qm set 9010 --scsi0 local-lvm:vm-9010-disk-0 --ide2 local-lvm:cloudinit --boot order=scsi0 --serial0 socket --vga serial0
+qm set 9010 --scsi0 local-lvm:vm-9010-disk-0 --boot order=scsi0 --serial0 socket --vga serial0
 qm template 9010
 ```
 
