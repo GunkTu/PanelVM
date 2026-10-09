@@ -9,7 +9,8 @@ import { FINGERPRINT_RE, ProxmoxClient, scanCertificate, type Endpoint } from '.
 import { toPublicJob } from '../jobs/service.js';
 import { checkPermissions, collectInventory } from './inventory.js';
 import {
-  availableTemplates,
+  templateSetupHints,
+  templatesOnNode,
   createVmBody,
   insertVmRow,
   planCreate,
@@ -172,7 +173,12 @@ export function proxmoxRoutes(app: FastifyInstance, ctx: Ctx): void {
           target: row.name,
           result: 'ok',
         });
-        return { connection: toPublicConn(load(id)), inventory, permissions };
+        return {
+          connection: toPublicConn(load(id)),
+          inventory,
+          permissions,
+          hints: templateSetupHints(inventory, row.pool),
+        };
       } catch (e) {
         audit.record({
           userId: actor(req).id,
@@ -225,9 +231,10 @@ export function proxmoxRoutes(app: FastifyInstance, ctx: Ctx): void {
       const inv = await collectInventory(clientFor(ctx, row));
       return {
         pool: row.pool,
+        hints: templateSetupHints(inv, row.pool),
         nodes: inv.nodes.map((n) => {
           const seen = new Set<string>();
-          const osOptions = (n.online ? availableTemplates(inv, n.node) : [])
+          const osOptions = (n.online ? templatesOnNode(inv, n.node) : [])
             .filter((t) => !seen.has(t.os.id) && !!seen.add(t.os.id))
             .map((t) => ({
               id: t.os.id,

@@ -2,7 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { parseMainDisk } from '../src/modules/proxmox/inventory.js';
 import {
-  availableTemplates,
+  templateSetupHints,
+  templatesOnNode,
   ipv4ToNumber,
   isHostIn,
   parseCidr,
@@ -110,7 +111,7 @@ describe('parseMainDisk', () => {
   });
 });
 
-describe('availableTemplates', () => {
+describe('templatesOnNode dan templateSetupHints', () => {
   const tpl = (vmid: number, osId: string, shared: boolean) => ({
     vmid,
     name: `tpl-${osId}`,
@@ -128,6 +129,7 @@ describe('availableTemplates', () => {
     memFreeBytes: null,
     memTotalBytes: null,
     templates,
+    vmids: templates.map((t) => t.vmid),
     ignoredTemplates: 0,
     storages: [],
     bridges: [],
@@ -137,19 +139,47 @@ describe('availableTemplates', () => {
     nodes: [
       node('a', true, [tpl(1, 'debian12', true), tpl(2, 'ubuntu2404', false)]),
       node('b', true, [tpl(3, 'debian12', false)]),
-      node('c', false, [tpl(4, 'debian12', true)]),
+      node('c', true, []),
+      node('d', false, [tpl(4, 'debian12', true)]),
     ],
   };
 
-  it('template lokal hanya untuk node pemiliknya; template bersama untuk semua node online', () => {
-    expect(availableTemplates(inv, 'a').map((t) => t.vmid)).toEqual([1, 2]);
-    // di node b: miliknya sendiri lebih dulu, lalu yang bersama dari node lain; ubuntu lokal di a tidak tersedia
-    expect(availableTemplates(inv, 'b').map((t) => [t.vmid, t.ownerNode])).toEqual([
-      [3, 'b'],
-      [1, 'a'],
+  it('hanya template di node tujuan yang dipakai (clone lintas node ke storage lokal tidak didukung Proxmox)', () => {
+    expect(templatesOnNode(inv, 'a').map((t) => t.vmid)).toEqual([1, 2]);
+    expect(templatesOnNode(inv, 'b').map((t) => t.vmid)).toEqual([3]);
+    expect(templatesOnNode(inv, 'c')).toEqual([]);
+    expect(templatesOnNode(inv, 'd')).toEqual([]); // node offline
+    expect(templatesOnNode(inv, 'tidak-ada')).toEqual([]);
+  });
+
+  it('petunjuk: perintah untuk node yang belum punya template bersama, nomor VM yang kosong', () => {
+    const hints = templateSetupHints(inv, 'panel');
+    // hanya template di storage bersama yang bisa disalin; b sudah punya debian12; ubuntu lokal tidak ikut
+    expect(hints.map((h) => [h.node, h.osId, h.fromNode, h.newVmid, h.name])).toEqual([
+      ['c', 'debian12', 'a', 5, 'tpl-debian12-c'],
     ]);
-    // node offline tidak menyumbang template
-    expect(availableTemplates(inv, 'c').map((t) => t.vmid)).toEqual([1]);
+    expect(hints[0]!.commands).toEqual([
+      'qm clone 1 5 --name tpl-debian12-c --full 1 --storage s --target c --pool panel',
+      'pvesh create /nodes/c/qemu/5/template',
+    ]);
+  });
+
+  it('petunjuk tidak pernah memakai nomor yang sudah dipakai atau nama tidak aman', () => {
+    const crowded: Inventory = {
+      version: '8',
+      nodes: [
+        { ...node('a', true, [tpl(10, 'debian12', true)]), vmids: [10, 11, 12] },
+        node('Aneh Node', true, []),
+        node('n2', true, []),
+        node('n3', true, []),
+      ],
+    };
+    const hints = templateSetupHints(crowded, 'panel');
+    expect(hints.map((h) => [h.node, h.newVmid])).toEqual([
+      ['n2', 13],
+      ['n3', 14],
+    ]);
+    expect(templateSetupHints(crowded, 'pool; rm -rf /')).toEqual([]);
   });
 });
 
@@ -164,7 +194,7 @@ describe.skipIf(!hasOpenssl)('membuat VM dari panel (Proxmox dan SSH tiruan)', (
   let connId = '';
 
   const base = () => ({
-    node: 'pve2',
+    node: 'pve1',
     osId: 'debian12',
     name: 'web-teman1',
     cores: 2,
@@ -223,7 +253,7 @@ describe.skipIf(!hasOpenssl)('membuat VM dari panel (Proxmox dan SSH tiruan)', (
     tls.cleanup();
   });
 
-  it('opsi wizard: OS yang tersedia per node (template bersama muncul di semua node online)', async () => {
+  it('opsi wizard: hanya OS dengan template di node itu, plus petunjuk membuat template di node lain', async () => {
     const res = await call(app, admin, 'GET', `/api/admin/proxmox/${connId}/options`);
     expect(res.statusCode).toBe(200);
     const nodes = res.json().nodes as {
@@ -237,9 +267,19 @@ describe.skipIf(!hasOpenssl)('membuat VM dari panel (Proxmox dan SSH tiruan)', (
     expect(by.pve1!.osOptions.map((o) => o.id)).toEqual(['debian12']);
     expect(by.pve2!.osOptions.map((o) => [o.id, o.ownerNode, o.shared])).toEqual([
       ['ubuntu2404', 'pve2', false],
-      ['debian12', 'pve1', true],
     ]);
-    expect(by.pve2!.osOptions.find((o) => o.id === 'debian12')!.minDiskGb).toBe(3);
+    expect(by.pve1!.osOptions[0]!.minDiskGb).toBe(3);
+    const hints = res.json().hints as { node: string; osId: string; commands: string[] }[];
+    expect(hints).toEqual([
+      expect.objectContaining({
+        node: 'pve2',
+        osId: 'debian12',
+        commands: [
+          'qm clone 9000 9001 --name tpl-debian12-pve2 --full 1 --storage tpl-smb --target pve2 --pool panel',
+          'pvesh create /nodes/pve2/qemu/9001/template',
+        ],
+      }),
+    ]);
     expect(by.pve3!.online).toBe(false);
     expect(by.pve3!.osOptions).toEqual([]);
     expect(by.pve1!.bridges).toEqual(['vmbr0', 'vmbr1']);
@@ -258,7 +298,7 @@ describe.skipIf(!hasOpenssl)('membuat VM dari panel (Proxmox dan SSH tiruan)', (
     ).toBe(404);
   });
 
-  it('jalur utama (lintas node): urutan dan isi panggilan ke Proxmox, VM terdaftar di panel', async () => {
+  it('jalur utama: urutan dan isi panggilan ke Proxmox, VM terdaftar di panel', async () => {
     reset();
     const res = await create();
     expect(res.statusCode).toBe(202);
@@ -270,10 +310,10 @@ describe.skipIf(!hasOpenssl)('membuat VM dari panel (Proxmox dan SSH tiruan)', (
     const reqs = fake.requests;
     const writes = reqs.filter((r) => r.method !== 'GET');
     expect(writes.map((r) => `${r.method} ${r.path}`)).toEqual([
-      'POST /nodes/pve1/qemu/9000/clone', // pemilik template (storage bersama)
-      'PUT /nodes/pve2/qemu/200/config', // node tujuan
-      'PUT /nodes/pve2/qemu/200/resize',
-      'POST /nodes/pve2/qemu/200/status/start',
+      'POST /nodes/pve1/qemu/9000/clone', // clone lokal di node yang punya template
+      'PUT /nodes/pve1/qemu/200/config',
+      'PUT /nodes/pve1/qemu/200/resize',
+      'POST /nodes/pve1/qemu/200/status/start',
     ]);
     const [clone, config, resize] = writes;
     expect(clone!.form).toMatchObject({
@@ -282,8 +322,8 @@ describe.skipIf(!hasOpenssl)('membuat VM dari panel (Proxmox dan SSH tiruan)', (
       full: '1',
       storage: 'local-lvm',
       pool: 'panel',
-      target: 'pve2',
     });
+    expect(clone!.form.target).toBeUndefined(); // tidak pernah lintas node
     expect(config!.form).toMatchObject({
       cores: '2',
       memory: '2048',
@@ -316,7 +356,7 @@ describe.skipIf(!hasOpenssl)('membuat VM dari panel (Proxmox dan SSH tiruan)', (
     expect(
       ctx.db.prepare('SELECT node, vmid, template_vmid FROM vm_proxmox WHERE vm_id = ?').get(vmId),
     ).toEqual({
-      node: 'pve2',
+      node: 'pve1',
       vmid: 200,
       template_vmid: 9000,
     });
@@ -377,7 +417,8 @@ describe.skipIf(!hasOpenssl)('membuat VM dari panel (Proxmox dan SSH tiruan)', (
       [{ node: 'pve3' }, 409, 'node_offline'],
       [{ storage: 'tidak-ada' }, 400, 'bad_storage'],
       [{ bridge: 'vmbr9' }, 400, 'bad_bridge'],
-      [{ osId: 'ubuntu2404', node: 'pve1' }, 409, 'no_template'],
+      [{ osId: 'ubuntu2404', node: 'pve1' }, 409, 'template_not_on_node'],
+      [{ osId: 'debian12', node: 'pve2' }, 409, 'template_not_on_node'],
       [{ osId: 'debian99' }, 409, 'no_template'],
       [{ osId: 'centos9' }, 400, 'invalid_input'],
       [{ diskGb: 2 }, 400, 'disk_too_small'],
@@ -392,7 +433,8 @@ describe.skipIf(!hasOpenssl)('membuat VM dari panel (Proxmox dan SSH tiruan)', (
     expect(fake.requests.filter((r) => r.method !== 'GET')).toEqual([]);
     expect(ctx.db.prepare('SELECT COUNT(*) c FROM vms').get()).toEqual({ c: 0 });
     const noTpl = await create({ osId: 'ubuntu2404', node: 'pve1' });
-    expect(noTpl.json().message).toMatch(/node pve2 dengan disk lokal/);
+    expect(noTpl.json().message).toMatch(/ada di node pve2 tetapi belum di pve1/);
+    expect(noTpl.json().message).toMatch(/clone lintas node ke storage bersama/);
   });
 
   it('nama dan IP yang sudah dipakai VM lain ditolak (409)', async () => {
@@ -418,7 +460,7 @@ describe.skipIf(!hasOpenssl)('membuat VM dari panel (Proxmox dan SSH tiruan)', (
       const { job, vmId } = await finish(await create());
       expect(job.status).toBe('failed');
       expect(job.log).toMatch(/Tugas di Proxmox gagal: ERROR: simulasi gagal/);
-      expect(job.log).toMatch(/VM sudah dibuat di Proxmox \(node pve2, nomor 200\)/);
+      expect(job.log).toMatch(/VM sudah dibuat di Proxmox \(node pve1, nomor 200\)/);
       expect(job.log).toMatch(/Panel TIDAK menghapusnya/);
       expect(ctx.db.prepare('SELECT COUNT(*) c FROM vm_proxmox WHERE vm_id = ?').get(vmId)).toEqual(
         { c: 1 },

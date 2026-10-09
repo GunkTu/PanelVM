@@ -14,6 +14,7 @@ import {
 import { api } from '../../lib/api';
 import { formatBytes, formatTime } from '../../lib/format';
 import { ProxmoxCreateVm } from './ProxmoxCreateVm';
+import { TemplateHints, type TemplateHint } from './TemplateHints';
 
 interface Endpoint {
   url: string;
@@ -57,6 +58,7 @@ interface TestResult {
   connection: Connection;
   inventory: { version: string | null; nodes: NodeInventory[] };
   permissions: { path: string; purpose: string; missing: string[]; unknown?: boolean }[];
+  hints: TemplateHint[];
 }
 interface Scanned {
   url: string;
@@ -278,6 +280,7 @@ function TestPanel({ result }: { result: TestResult }) {
           </p>
         </div>
       )}
+      <TemplateHints hints={result.hints ?? []} />
       <div className="grid gap-3 md:grid-cols-2">
         {inventory.nodes.map((n) => (
           <div key={n.node} className="rounded-xl border border-slate-200 p-3">
@@ -314,19 +317,6 @@ function TestPanel({ result }: { result: TestResult }) {
                     ))}
                   </ul>
                 )}
-                {(() => {
-                  const fromOthers = inventory.nodes
-                    .filter((o) => o.node !== n.node && o.online)
-                    .flatMap((o) =>
-                      o.templates.filter((t) => t.shared).map((t) => ({ ...t, owner: o.node })),
-                    );
-                  return fromOthers.length ? (
-                    <p className="mt-1 text-sm text-green-700">
-                      Juga bisa dipakai di node ini (template bersama dari node lain):{' '}
-                      {fromOthers.map((t) => `${t.os.label} (di ${t.owner})`).join(', ')}.
-                    </p>
-                  ) : null;
-                })()}
                 {n.ignoredTemplates > 0 && (
                   <p className="text-xs text-slate-500">
                     {n.ignoredTemplates} template lain diabaikan (nama bukan Debian/Ubuntu).

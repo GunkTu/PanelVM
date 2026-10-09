@@ -64,7 +64,18 @@ Catatan keamanan:
 
 ## 3. Template Debian dan Ubuntu (satu per OS per node)
 
-Storage VM Anda `local-lvm` per node (tidak dipakai bersama), jadi template harus ada **di setiap node**. Nomor VM (VMID) harus unik se-cluster:
+Storage VM Anda `local-lvm` per node (tidak dipakai bersama), jadi template harus ada **di setiap node tempat VM akan dibuat**: Proxmox hanya mengizinkan clone lintas node ke storage bersama, sehingga VM di `local-lvm` harus di-clone dari template di node yang sama. Disk template sendiri boleh di storage bersama (mis. share SMB `tpl-smb`).
+
+**Cara cepat untuk node lain** bila Anda sudah punya template dengan disk di storage bersama (mis. di PxThegt): salin lewat storage bersama, lalu jadikan template. Halaman Buat VM dan Tes menampilkan perintah yang pas untuk node Anda. Bentuknya (di Shell node pemilik template, satu perintah per kali):
+
+```
+qm clone 9000 9001 --name tpl-debian12-thegt1 --full 1 --storage tpl-smb --target TheGt1 --pool panel
+pvesh create /nodes/TheGt1/qemu/9001/template
+```
+
+Peringatan `chattr` pada storage SMB boleh diabaikan. Template baru masuk pool `panel` sehingga hak token yang ada berlaku. **[belum diuji di Proxmox nyata]**.
+
+Nomor VM (VMID) harus unik se-cluster. Bila membuat sendiri dari image:
 
 | Node | Debian 12 | Ubuntu 24.04 |
 | --- | --- | --- |
@@ -114,7 +125,7 @@ Klik **Buat VM** pada koneksi. Pilihan di wizard datang langsung dari Proxmox: n
 Panel lalu menjalankan job berlog:
 
 1. Meminta nomor VM kosong dari Proxmox (`/cluster/nextid`).
-2. **Clone penuh** template ke storage pilihan, ditaruh di pool `panel`. Template di storage bersama (mis. `tpl-smb`) bisa di-clone ke node mana pun; template di storage lokal hanya untuk node pemiliknya.
+2. **Clone penuh** template yang ada **di node tujuan** ke storage pilihan (mis. `local-lvm`), ditaruh di pool `panel`. Panel tidak pernah meng-clone lintas node: Proxmox hanya mengizinkannya ke storage bersama (galat "can't clone to non-shared storage"), sedangkan VM sebaiknya berjalan di storage lokal. Karena itu tiap node perlu template sendiri (lihat bagian 3).
 3. Mengisi cloud-init: CPU, RAM, user (`debian` atau `ubuntu`), kunci SSH publik khusus VM itu, `ipconfig0` (IP, gateway), DNS, dan bridge/VLAN.
 4. Memperbesar disk ke ukuran pilihan (disk hanya bisa diperbesar), lalu menyalakan VM.
 5. Menunggu port SSH menjawab, lalu membaca host key.
@@ -127,12 +138,12 @@ Setelah job selesai: buka **Admin, Kelola VM**, pindai dan setujui host key VM (
 
 **[belum diuji di Proxmox 8.4 nyata]**: urutan dan isi panggilan diuji dengan server Proxmox tiruan. Hal yang baru terbukti saat VM uji pertama dibuat:
 
-- Clone lintas node dari storage bersama ke `local-lvm` node lain (mungkin butuh hak tambahan seperti `VM.Migrate`; pesan galat 403 menyebut path dan hak yang kurang).
+- Clone lokal di node yang punya template ke `local-lvm` (clone lintas node tidak dipakai; lihat bagian 3).
 - Format nilai `sshkeys` (dikirim ter-URL-encode sekali, sesuai dokumentasi API) dan user cloud-init bawaan image.
 - Disk cloud-init (`ide2`) di template tertaut ke `local-lvm` node pemilik; pada clone ke node lain Proxmox seharusnya membuatnya ulang di storage tujuan.
 - Perilaku jaringan: VM panel harus bisa menjangkau IP VM baru agar langkah "menunggu SSH" berhasil.
 
-Uji pertama yang disarankan: buat satu VM kecil (1 CPU, 1 GB RAM, disk 8 GB) di node yang sama dengan template, lalu satu lagi lintas node.
+Uji pertama yang disarankan: buat satu VM kecil (1 CPU, 1 GB RAM, disk 8 GB) di node yang punya template, lalu satu lagi di node lain setelah template node itu dibuat (bagian 3).
 ## 6. CT (LXC)
 
 Tahap ini untuk **VM (QEMU)**. Dukungan CT (LXC) direncanakan menyusul; alurnya lebih sederhana (tanpa cloud-init, memakai template CT resmi) tetapi isolasinya lebih lemah daripada VM, jadi hanya CT unprivileged yang akan dibuat.

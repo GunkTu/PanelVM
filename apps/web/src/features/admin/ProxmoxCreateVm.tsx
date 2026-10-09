@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { Button, Input, JobLog, Modal, Skeleton, useToast } from '../../components';
 import { api } from '../../lib/api';
 import { formatBytes } from '../../lib/format';
+import { TemplateHints, type TemplateHint } from './TemplateHints';
 
 interface OsOption {
   id: string;
@@ -25,6 +26,7 @@ interface NodeOption {
 }
 interface Options {
   pool: string;
+  hints: TemplateHint[];
   nodes: NodeOption[];
 }
 
@@ -217,6 +219,19 @@ export function ProxmoxCreateVm({
         </p>
       ) : (
         <div className="flex flex-col gap-4">
+          <TemplateHints hints={options.data?.hints ?? []} />
+          {(options.data?.hints.length ?? 0) > 0 && (
+            <div>
+              <Button
+                size="sm"
+                variant="secondary"
+                loading={options.isFetching}
+                onClick={() => void options.refetch()}
+              >
+                Muat ulang pilihan
+              </Button>
+            </div>
+          )}
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <label className="text-sm font-medium text-slate-700" htmlFor="pv-node">

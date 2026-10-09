@@ -121,17 +121,69 @@ export interface TemplateChoice extends TemplateInfo {
   ownerNode: string;
 }
 
-/** Template yang bisa dipakai untuk membuat VM di `node`: yang ada di node itu, atau yang diskusinya di storage bersama. */
-export function availableTemplates(inv: Inventory, node: string): TemplateChoice[] {
-  const out: TemplateChoice[] = [];
-  for (const n of inv.nodes) {
-    if (!n.online) continue;
-    for (const t of n.templates) {
-      if (n.node === node || t.shared) out.push({ ...t, ownerNode: n.node });
+/**
+ * Template yang bisa dipakai untuk membuat VM di `node`: hanya yang ada DI node itu. Proxmox hanya mengizinkan clone
+ * lintas node bila storage tujuan bersama, sedangkan VM sebaiknya berjalan di storage lokal (mis. local-lvm); karena itu
+ * tiap node perlu template sendiri (disknya boleh di storage bersama). Lihat templateSetupHints.
+ */
+export function templatesOnNode(inv: Inventory, node: string): TemplateChoice[] {
+  const n = inv.nodes.find((x) => x.node === node);
+  if (!n?.online) return [];
+  return n.templates.map((t) => ({ ...t, ownerNode: n.node }));
+}
+
+export interface SetupHint {
+  /** Node yang belum punya template OS ini. */
+  node: string;
+  osId: string;
+  label: string;
+  /** Node yang sudah punya template bersama (tempat perintah dijalankan). */
+  fromNode: string;
+  newVmid: number;
+  name: string;
+  commands: string[];
+}
+
+const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/**
+ * Untuk tiap node online yang belum punya template sebuah OS padahal node lain punya template dengan disk di storage
+ * bersama: perintah siap-salin untuk membuatnya (clone lewat storage bersama ke node itu, lalu jadikan template).
+ * Dijalankan di Shell node pemilik template; panel sendiri tidak menjalankannya.
+ */
+export function templateSetupHints(inv: Inventory, pool: string): SetupHint[] {
+  const online = inv.nodes.filter((n) => n.online);
+  const used = new Set(inv.nodes.flatMap((n) => n.vmids));
+  const sharedByOs = new Map<string, { t: TemplateInfo; owner: string }>();
+  for (const n of online)
+    for (const t of n.templates)
+      if (t.shared && t.diskStorage && !sharedByOs.has(t.os.id))
+        sharedByOs.set(t.os.id, { t, owner: n.node });
+  const hints: SetupHint[] = [];
+  for (const [osId, { t, owner }] of sharedByOs) {
+    if (!SAFE_NAME.test(t.diskStorage!) || !SAFE_NAME.test(pool)) continue;
+    for (const n of online) {
+      if (n.node === owner || n.templates.some((x) => x.os.id === osId) || !SAFE_NAME.test(n.node))
+        continue;
+      let id = t.vmid + 1;
+      while (used.has(id)) id++;
+      used.add(id);
+      const name = `tpl-${osId}-${n.node.toLowerCase().replace(/[^a-z0-9-]/g, '')}`;
+      hints.push({
+        node: n.node,
+        osId,
+        label: t.os.label,
+        fromNode: owner,
+        newVmid: id,
+        name,
+        commands: [
+          `qm clone ${t.vmid} ${id} --name ${name} --full 1 --storage ${t.diskStorage} --target ${n.node} --pool ${pool}`,
+          `pvesh create /nodes/${n.node}/qemu/${id}/template`,
+        ],
+      });
     }
   }
-  // Template di node tujuan lebih dulu (clone lokal lebih cepat dan tidak lintas node).
-  return out.sort((a, b) => Number(b.ownerNode === node) - Number(a.ownerNode === node));
+  return hints;
 }
 
 export interface Plan {
@@ -149,16 +201,16 @@ export function planCreate(ctx: Ctx, inv: Inventory, input: CreateVmInput): Plan
   if (!node) throw bad(`Node "${input.node}" tidak ada di cluster ini.`, 'bad_node');
   if (!node.online)
     throw new AppError(409, 'node_offline', `Node "${node.node}" sedang offline. Pilih node lain.`);
-  const template = availableTemplates(inv, node.node).find((t) => t.os.id === input.osId);
+  const template = templatesOnNode(inv, node.node).find((t) => t.os.id === input.osId);
   if (!template) {
-    const local = inv.nodes.flatMap((n) =>
-      n.templates.filter((t) => t.os.id === input.osId).map(() => n.node),
+    const elsewhere = inv.nodes.filter(
+      (n) => n.online && n.templates.some((t) => t.os.id === input.osId),
     );
     throw new AppError(
       409,
-      'no_template',
-      local.length
-        ? `Template ${input.osId} hanya ada di node ${local.join(', ')} dengan disk lokal, jadi tidak bisa di-clone ke ${node.node}. Pilih node itu, atau pindahkan disk template ke storage bersama.`
+      elsewhere.length ? 'template_not_on_node' : 'no_template',
+      elsewhere.length
+        ? `Template ${input.osId} ada di node ${elsewhere.map((n) => n.node).join(', ')} tetapi belum di ${node.node}. Proxmox hanya mengizinkan clone lintas node ke storage bersama, sedangkan VM sebaiknya di storage lokal. Buat template di node ${node.node} dengan perintah yang ditampilkan di wizard (atau Tes), lalu coba lagi.`
         : `Belum ada template untuk OS itu di node ${node.node}. Buat template bernama tpl-${input.osId} (lihat docs/PROXMOX.md).`,
     );
   }
@@ -293,9 +345,7 @@ export async function provisionVm(d: ProvisionDeps): Promise<void> {
     log(`Nomor VM di Proxmox: ${vmid}.\n`);
 
     step = 'meng-clone template';
-    log(
-      `[1/6] Clone template ke storage ${input.storage}${tpl.ownerNode !== target ? ` (lintas node: ${tpl.ownerNode} ke ${target})` : ''}...\n`,
-    );
+    log(`[1/6] Clone template ke storage ${input.storage} di node ${target}...\n`);
     const cloneUpid = await client.post<string>(`/nodes/${tpl.ownerNode}/qemu/${tpl.vmid}/clone`, {
       newid: vmid,
       name: input.name,
@@ -303,7 +353,6 @@ export async function provisionVm(d: ProvisionDeps): Promise<void> {
       storage: input.storage,
       pool: d.pool,
       description: 'Dibuat oleh Panel VM',
-      ...(tpl.ownerNode !== target ? { target } : {}),
     });
     await waitTask(client, tpl.ownerNode, cloneUpid, task);
     ctx.db

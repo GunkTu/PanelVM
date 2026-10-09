@@ -95,6 +95,8 @@ export interface NodeInventory {
   memFreeBytes: number | null;
   memTotalBytes: number | null;
   templates: TemplateInfo[];
+  /** Nomor semua VM/template di node ini (untuk memilih nomor template baru yang kosong). */
+  vmids: number[];
   /** Jumlah template yang namanya tidak mengikuti pola Debian/Ubuntu (diabaikan). */
   ignoredTemplates: number;
   storages: {
@@ -140,6 +142,7 @@ export async function collectInventory(client: ProxmoxClient): Promise<Inventory
         memFreeBytes: n.maxmem != null && n.mem != null ? n.maxmem - n.mem : null,
         memTotalBytes: n.maxmem ?? null,
         templates: [],
+        vmids: [],
         ignoredTemplates: 0,
         storages: [],
         bridges: [],
@@ -152,6 +155,7 @@ export async function collectInventory(client: ProxmoxClient): Promise<Inventory
       ]);
       const errors: string[] = [];
       if (qemu.ok) {
+        base.vmids = qemu.v.map((v) => v.vmid);
         for (const vm of qemu.v) {
           if (!truthy(vm.template)) continue;
           const os = parseTemplateOs(vm.name ?? '');
