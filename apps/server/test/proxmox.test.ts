@@ -78,6 +78,7 @@ describe('daftar panggilan yang diizinkan', () => {
     expect(isAllowedCall('PUT', '/nodes/pve1/qemu/200/config')).toBe(true);
     expect(isAllowedCall('PUT', '/nodes/pve1/qemu/200/resize')).toBe(true);
     expect(isAllowedCall('POST', '/nodes/pve1/qemu/200/status/start')).toBe(true);
+    expect(isAllowedCall('POST', '/nodes/pve1/qemu/200/status/reboot')).toBe(true); // tombol restart
     for (const [m, p] of [
       ['DELETE', '/nodes/pve1/qemu/100'],
       ['DELETE', '/nodes/pve1/lxc/100'],
@@ -85,7 +86,6 @@ describe('daftar panggilan yang diizinkan', () => {
       ['POST', '/nodes/pve1/qemu/100/status/stop'],
       ['POST', '/nodes/pve1/qemu/100/status/stop'],
       ['POST', '/nodes/pve1/qemu/100/status/shutdown'],
-      ['POST', '/nodes/pve1/qemu/100/status/reboot'],
       ['POST', '/nodes/pve1/qemu'],
       ['POST', '/nodes/pve1/qemu/100/migrate'],
       ['PUT', '/nodes/pve1/qemu/100/status/start'],

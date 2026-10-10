@@ -28,6 +28,7 @@ import { api } from '../../lib/api';
 import { formatTime } from '../../lib/format';
 import type { NotificationItem, Vm } from '../../lib/types';
 import { useMe } from '../auth/AuthContext';
+import { RestartVmButton } from './RestartVmButton';
 
 const statusTone: Record<Vm['status'], BadgeTone> = {
   online: 'success',
@@ -384,6 +385,7 @@ export function AppLayout() {
             </nav>
           </div>
           <div className="flex items-center gap-2">
+            {vm.data && vmId && <RestartVmButton vmId={vmId} vmName={vm.data.name} />}
             {vm.data && (
               <Badge tone={statusTone[vm.data.status]} dot>
                 {statusLabel[vm.data.status]}

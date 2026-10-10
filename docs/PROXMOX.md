@@ -8,7 +8,7 @@ Panel bisa terhubung ke API Proxmox (satu cluster atau satu server) agar admin d
 | --- | --- | --- |
 | A | Koneksi, pin sertifikat, tes koneksi, daftar node/template/storage/bridge, periksa hak token. **Hanya membaca.** | Selesai |
 | B | Wizard Buat VM (clone template, isi cloud-init, nyalakan, daftarkan ke panel) | Selesai (belum diuji di Proxmox nyata) |
-| C | Tombol nyalakan, matikan, reboot | Setelah B |
+| C | Tombol restart VM (reboot) di header; nyalakan/matikan menyusul | Restart selesai |
 
 **[belum diuji di Proxmox 8.4 nyata]**: panel diuji dengan server Proxmox tiruan (HTTPS, pin sertifikat, token). Nama hak akses di bawah mengikuti dokumentasi Proxmox VE 8; tombol **Tes** di halaman Proxmox memeriksanya dan memberi saran. Jalankan Tes dulu sebelum mempercayai konfigurasi ini.
 

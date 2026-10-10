@@ -198,6 +198,13 @@ export async function startFakePve(
         (m = /^\/nodes\/(pve[12])\/qemu\/(\d+)\/status\/start$/.exec(path))
       )
         return send(200, upid(m[1]!, 'qmstart', Number(m[2])));
+      if (
+        req.method === 'POST' &&
+        (m = /^\/nodes\/(pve[12])\/qemu\/(\d+)\/status\/reboot$/.exec(path))
+      )
+        return send(200, upid(m[1]!, 'qmreboot', Number(m[2])));
+      if (req.method === 'GET' && /^\/nodes\/pve[12]\/qemu\/\d+\/status\/current$/.test(path))
+        return send(200, { status: 'running' });
       if ((m = /^\/nodes\/(pve[12])\/tasks\/(UPID:[^/]+)\/status$/.exec(path))) {
         const type = m[2]!.split(':')[5] ?? '';
         return opts.failTasks?.includes(type)

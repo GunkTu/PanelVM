@@ -32,13 +32,15 @@ export const ALLOWED_CALLS: readonly { method: HttpMethod; path: RegExp }[] = [
   { method: 'GET', path: new RegExp(`^/nodes/${NODE}/qemu/\\d{1,9}/config$`) },
   { method: 'GET', path: /^\/cluster\/nextid$/ },
   { method: 'GET', path: /^\/access\/permissions$/ },
-  // --- Tahap B: membuat VM dari template. Tidak ada stop/shutdown/reboot/delete/migrate. ---
+  // --- Tahap B: membuat VM dari template. Tidak ada stop/shutdown/delete/migrate. ---
   { method: 'GET', path: new RegExp(`^/nodes/${NODE}/qemu/\\d{1,9}/status/current$`) },
   { method: 'GET', path: new RegExp(`^/nodes/${NODE}/tasks/${UPID}/status$`) },
   { method: 'POST', path: new RegExp(`^/nodes/${NODE}/qemu/\\d{1,9}/clone$`) },
   { method: 'PUT', path: new RegExp(`^/nodes/${NODE}/qemu/\\d{1,9}/config$`) },
   { method: 'PUT', path: new RegExp(`^/nodes/${NODE}/qemu/\\d{1,9}/resize$`) },
   { method: 'POST', path: new RegExp(`^/nodes/${NODE}/qemu/\\d{1,9}/status/start$`) },
+  // Tombol restart di panel (reboot ACPI). Tetap tidak ada stop/shutdown/delete/migrate.
+  { method: 'POST', path: new RegExp(`^/nodes/${NODE}/qemu/\\d{1,9}/status/reboot$`) },
 ];
 
 export function isAllowedCall(method: string, path: string): boolean {

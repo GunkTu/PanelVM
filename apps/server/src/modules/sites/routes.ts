@@ -57,6 +57,9 @@ interface SiteRow {
   created_at: number;
 }
 
+/** Tulisan halaman awal buatan panel; dipakai juga untuk mengenalinya saat deploy. */
+const PLACEHOLDER_TEXT = 'Situs siap. Upload kode Anda lewat Panel VM.';
+
 const vmParams = z.object({ vmId: z.string().uuid() });
 const siteParams = z.object({ vmId: z.string().uuid(), siteId: z.string().uuid() });
 const phpVersion = z.string().regex(/^[5-9]\.\d$/, 'Versi PHP tidak valid.');
@@ -315,7 +318,7 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
           ])
         ).code === 0;
       if (empty) {
-        const page = `<!doctype html><meta charset="utf-8"><title>${b.domain}</title><h1>${b.domain}</h1><p>Situs siap. Upload kode Anda lewat Panel VM.</p>\n`;
+        const page = `<!doctype html><meta charset="utf-8"><title>${b.domain}</title><h1>${b.domain}</h1><p>${PLACEHOLDER_TEXT}</p>\n`;
         await must(
           vm,
           lease,
@@ -632,6 +635,19 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
     log: (t: string) => void,
   ): Promise<void> {
     const fresh = loadSite(vm, site.id);
+    // Halaman awal buatan panel dibuang dulu: bila dibiarkan, folder itu dianggap "sudah berisi index" dan
+    // folder dokumen sebenarnya (mis. public/ pada proyek PHP biasa) tidak pernah terdeteksi. Hanya berkas
+    // yang isinya persis tulisan panel yang dihapus; index.html milik pengguna tidak disentuh.
+    for (const rel of ['index.html', 'public/index.html']) {
+      await exec(vm, lease, [
+        'sh',
+        '-c',
+        'grep -qF -- "$1" "$2" 2>/dev/null && rm -f -- "$2"',
+        'sh',
+        PLACEHOLDER_TEXT,
+        `${siteRoot(site.domain)}/${rel}`,
+      ]);
+    }
     if (fresh.doc_root !== null) return; // pengguna sudah memilih sendiri
     const r = await exec(vm, lease, findDirsArgv(siteRoot(site.domain)), { timeoutMs: 30_000 });
     const entries = parseDirListing(r.stdout);

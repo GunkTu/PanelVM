@@ -21,6 +21,7 @@ import { AppError } from './errors.js';
 import { JobService } from './modules/jobs/service.js';
 import { isPreviewHost, previewHook } from './modules/previews/proxy.js';
 import { previewRoutes } from './modules/previews/routes.js';
+import { powerRoutes } from './modules/proxmox/power.js';
 import { proxmoxRoutes } from './modules/proxmox/routes.js';
 import { PreviewManager } from './modules/previews/service.js';
 import { VmWatcher } from './modules/vms/watcher.js';
@@ -172,6 +173,7 @@ export async function buildApp(env: Env, opts: BuildOptions = {}): Promise<Built
   siteRoutes(app, ctx);
   previewRoutes(app, ctx);
   proxmoxRoutes(app, ctx);
+  powerRoutes(app, ctx);
 
   // Produksi: sajikan SPA dari origin yang sama dengan API (tanpa CORS).
   const webDist = join(dirname(fileURLToPath(import.meta.url)), '../../web/dist');
