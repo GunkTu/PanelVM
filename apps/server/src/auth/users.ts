@@ -19,6 +19,7 @@ export interface UserRow {
   locked_until: number | null;
   created_at: number;
   last_login_at: number | null;
+  max_sites: number;
 }
 
 /** Bentuk user yang aman dikirim ke browser (tanpa hash, secret, dan counter internal). */
@@ -30,6 +31,7 @@ export interface PublicUser {
   totpEnabled: boolean;
   createdAt: number;
   lastLoginAt: number | null;
+  maxSites: number;
 }
 
 export const toPublicUser = (u: UserRow): PublicUser => ({
@@ -40,6 +42,7 @@ export const toPublicUser = (u: UserRow): PublicUser => ({
   totpEnabled: u.totp_enabled === 1,
   createdAt: u.created_at,
   lastLoginAt: u.last_login_at,
+  maxSites: u.max_sites,
 });
 
 export const getUserById = (db: Db, id: string): UserRow | undefined =>

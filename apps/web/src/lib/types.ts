@@ -8,6 +8,7 @@ export interface User {
   totpEnabled: boolean;
   createdAt: number;
   lastLoginAt: number | null;
+  maxSites: number;
 }
 
 export interface Me {
@@ -44,6 +45,7 @@ export interface Vm {
 
 export interface ClientUser extends User {
   vm: { id: string; name: string } | null;
+  siteCount: number;
 }
 
 export interface NotificationItem {

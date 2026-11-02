@@ -36,7 +36,14 @@ export function userRoutes(app: FastifyInstance, ctx: Ctx): void {
             'SELECT v.id, v.name FROM vm_access a JOIN vms v ON v.id = a.vm_id WHERE a.user_id = ?',
           )
           .get(u.id) as { id: string; name: string } | undefined;
-        return { ...toPublicUser(u), vm: vm ?? null };
+        const siteCount = (
+          db
+            .prepare(
+              'SELECT COUNT(*) AS c FROM sites s JOIN vm_access a ON a.vm_id = s.vm_id WHERE a.user_id = ?',
+            )
+            .get(u.id) as { c: number }
+        ).c;
+        return { ...toPublicUser(u), vm: vm ?? null, siteCount };
       }),
     };
   });
@@ -70,17 +77,38 @@ export function userRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.patch('/api/users/:id', { onRequest: requireAdmin }, async (req) => {
     const { id } = idParams.parse(req.params);
-    const { status } = z.object({ status: z.enum(['active', 'suspended']) }).parse(req.body);
+    const { status, maxSites } = z
+      .object({
+        status: z.enum(['active', 'suspended']).optional(),
+        maxSites: z.number().int().min(0).max(1000).optional(),
+      })
+      .refine((b) => b.status !== undefined || b.maxSites !== undefined, {
+        message: 'Isi status atau batas situs.',
+      })
+      .parse(req.body);
     const user = loadClient(id);
-    db.prepare('UPDATE users SET status = ? WHERE id = ?').run(status, id);
-    if (status === 'suspended') revokeAccess(id, 'Akun ditangguhkan admin');
-    audit.record({
-      userId: actor(req).id,
-      ip: req.ip,
-      action: `user.${status === 'suspended' ? 'suspend' : 'activate'}`,
-      target: user.email,
-      result: 'ok',
-    });
+    if (status) {
+      db.prepare('UPDATE users SET status = ? WHERE id = ?').run(status, id);
+      if (status === 'suspended') revokeAccess(id, 'Akun ditangguhkan admin');
+      audit.record({
+        userId: actor(req).id,
+        ip: req.ip,
+        action: `user.${status === 'suspended' ? 'suspend' : 'activate'}`,
+        target: user.email,
+        result: 'ok',
+      });
+    }
+    if (maxSites !== undefined) {
+      db.prepare('UPDATE users SET max_sites = ? WHERE id = ?').run(maxSites, id);
+      audit.record({
+        userId: actor(req).id,
+        ip: req.ip,
+        action: 'user.set_max_sites',
+        target: user.email,
+        result: 'ok',
+        meta: { from: user.max_sites, to: maxSites },
+      });
+    }
     return toPublicUser(getUserById(db, id)!);
   });
 

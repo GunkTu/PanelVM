@@ -9,7 +9,7 @@ Panel ini adalah pintu masuk ke akses root semua VM, dan terbuka ke internet lew
 | Ancaman | Kontrol utama | Bukti |
 |---|---|---|
 | Penyerang dari internet menebak/mencuri kredensial | argon2id, password >= 12 karakter, lockout 5x/15 menit, rate limit login/2FA per IP, pesan error seragam, 2FA TOTP wajib, TOTP anti-replay atomik, recovery code argon2 sekali pakai | `test/auth.test.ts`, E2E `auth.spec.ts` |
-| Pencurian sesi / CSRF / clickjacking | cookie `__Host-` `Secure` `HttpOnly` `SameSite=Strict`, token sesi acak (DB hanya menyimpan HMAC), idle 30 menit + absolut 12 jam, token CSRF terikat sesi + validasi `Origin`, CSP ketat, `frame-ancestors 'none'` | `test/auth.test.ts`, `test/security-headers.test.ts` |
+| Pencurian sesi / CSRF / clickjacking | cookie `__Host-` `Secure` `HttpOnly` `SameSite=Strict`, token sesi acak (DB hanya menyimpan HMAC), idle 24 jam + absolut 24 jam, token CSRF terikat sesi + validasi `Origin`, CSP ketat, `frame-ancestors 'none'` | `test/auth.test.ts`, `test/security-headers.test.ts` |
 | Client mengakses VM/data client lain (IDOR) | `assertVmAccess` di setiap endpoint/WS; bukan pemilik = 404; modul dimatikan = 403 (termasuk admin); role dicek di server | matriks IDOR otomatis (`test/rbac.test.ts`), E2E `isolation.spec.ts` |
 | Akun disuspend masih punya akses | sesi dihapus dan terminal diputus seketika; liveness check tiap 15 detik | `test/rbac.test.ts`, E2E (terminal "Ditutup" di browser) |
 | Pencurian kredensial VM | kunci SSH ed25519 per VM, AES-256-GCM (nonce unik, AAD terikat id), tidak pernah ke browser/log/audit/error, host key wajib disetujui admin dan dicek tiap koneksi | `test/secrets.test.ts`, `test/rbac.test.ts` |

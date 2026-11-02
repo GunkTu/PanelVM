@@ -36,10 +36,7 @@ export function LoginPage() {
   };
 
   return (
-    <AuthShell
-      title="Masuk"
-      subtitle="Gunakan akun yang dibuat admin. Tidak ada pendaftaran mandiri."
-    >
+    <AuthShell title="Masuk" subtitle="Gunakan akun yang dibuat admin.">
       <form onSubmit={submit} className="flex flex-col gap-4">
         <Input
           icon={<Mail className="h-4 w-4" />}

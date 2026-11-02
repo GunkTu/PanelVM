@@ -73,9 +73,6 @@ export function AuthShell({
             ))}
           </ul>
         </div>
-        <p className="relative text-xs text-slate-400">
-          Khusus pengguna yang diundang admin. Tidak ada pendaftaran mandiri.
-        </p>
       </aside>
 
       <main className="flex min-h-screen flex-col items-center justify-center bg-canvas p-5 sm:p-8 lg:min-h-0">

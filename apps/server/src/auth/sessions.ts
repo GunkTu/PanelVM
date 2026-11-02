@@ -17,8 +17,9 @@ export interface SessionRow {
   fail_count: number;
 }
 
-export const SESSION_IDLE_MS = 30 * 60 * 1000;
-export const SESSION_ABSOLUTE_MS = 12 * 60 * 60 * 1000;
+// Sesi berlaku 24 jam (atas permintaan pemilik). Batas idle disamakan agar tidak memotong sesi lebih awal.
+export const SESSION_IDLE_MS = 24 * 60 * 60 * 1000;
+export const SESSION_ABSOLUTE_MS = 24 * 60 * 60 * 1000;
 export const PENDING_MS = 10 * 60 * 1000;
 export const MAX_2FA_FAILS = 5;
 const TOUCH_INTERVAL_MS = 60 * 1000;

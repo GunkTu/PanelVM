@@ -29,6 +29,8 @@ export function AdminUsersPage() {
   const [pending, setPending] = useState<Pending>(null);
   const [resetFor, setResetFor] = useState<ClientUser | null>(null);
   const [newPassword, setNewPassword] = useState('');
+  const [limitFor, setLimitFor] = useState<ClientUser | null>(null);
+  const [limitValue, setLimitValue] = useState('');
 
   const refresh = () => qc.invalidateQueries({ queryKey: ['users'] });
 
@@ -88,6 +90,21 @@ export function AdminUsersPage() {
     },
   });
 
+  const setLimit = useMutation({
+    mutationFn: () =>
+      api(`/api/users/${limitFor?.id}`, {
+        method: 'PATCH',
+        body: { maxSites: Number(limitValue) },
+      }),
+    onSuccess: async () => {
+      await refresh();
+      toast.show('success', `Batas situs ${limitFor?.email} diatur ke ${limitValue}.`);
+      setLimitFor(null);
+    },
+    onError: (e) => toast.show('error', e.message),
+  });
+  const limitValid = /^\d{1,4}$/.test(limitValue) && Number(limitValue) <= 1000;
+
   const submit = (e: FormEvent) => {
     e.preventDefault();
     create.mutate();
@@ -132,6 +149,22 @@ export function AdminUsersPage() {
                 ),
             },
             { header: 'VM', render: (u) => u.vm?.name ?? '-' },
+            {
+              header: 'Situs web',
+              render: (u) => (
+                <button
+                  type="button"
+                  title="Ubah batas situs"
+                  className="rounded px-1.5 py-0.5 text-sm hover:bg-slate-100"
+                  onClick={() => {
+                    setLimitFor(u);
+                    setLimitValue(String(u.maxSites));
+                  }}
+                >
+                  {u.siteCount} / {u.maxSites}
+                </button>
+              ),
+            },
             { header: 'Login terakhir', render: (u) => formatTime(u.lastLoginAt) },
             {
               header: 'Aksi',
@@ -227,6 +260,36 @@ export function AdminUsersPage() {
             </Button>
             <Button loading={resetPw.isPending} onClick={() => resetPw.mutate()}>
               Ganti password
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={!!limitFor}
+        title={`Batas situs web: ${limitFor?.email ?? ''}`}
+        onClose={() => setLimitFor(null)}
+      >
+        <div className="flex flex-col gap-3">
+          <Input
+            label="Maksimal situs web"
+            type="number"
+            min={0}
+            max={1000}
+            hint={`Saat ini terpakai ${limitFor?.siteCount ?? 0}. Isi 0 untuk melarang membuat situs baru (situs yang sudah ada tetap jalan). Maksimal 1000.`}
+            value={limitValue}
+            onChange={(e) => setLimitValue(e.target.value)}
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setLimitFor(null)}>
+              Batal
+            </Button>
+            <Button
+              disabled={!limitValid}
+              loading={setLimit.isPending}
+              onClick={() => setLimit.mutate()}
+            >
+              Simpan
             </Button>
           </div>
         </div>

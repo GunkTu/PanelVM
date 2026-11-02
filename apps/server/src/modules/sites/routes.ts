@@ -231,6 +231,25 @@ export function siteRoutes(app: FastifyInstance, ctx: Ctx): void {
 
   app.post('/api/vms/:vmId/sites', { onRequest: requireActive }, async (req, reply) => {
     const { vm, userId } = access(req);
+    // Batas jumlah situs per client (admin tidak dibatasi). Dihitung dari semua VM milik client itu.
+    if (actor(req).role === 'client') {
+      const lim = db.prepare('SELECT max_sites AS m FROM users WHERE id = ?').get(userId) as
+        { m: number } | undefined;
+      const used = (
+        db
+          .prepare(
+            'SELECT COUNT(*) AS c FROM sites s JOIN vm_access a ON a.vm_id = s.vm_id WHERE a.user_id = ?',
+          )
+          .get(userId) as { c: number }
+      ).c;
+      if (lim && used >= lim.m) {
+        throw new AppError(
+          403,
+          'site_limit',
+          `Batas situs web akun Anda tercapai (${used} dari ${lim.m}). Hapus situs yang tidak dipakai, atau minta admin menaikkan batasnya.`,
+        );
+      }
+    }
     const b = z
       .object({
         domain,
