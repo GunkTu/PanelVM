@@ -1,4 +1,6 @@
-# Roadmap (disepakati dengan pemilik proyek, belum dikerjakan)
+# Roadmap (disepakati dengan pemilik proyek)
+
+Status: poin 1-6 sudah dikerjakan (lihat bagian "Fitur tambahan" di docs/DEPLOY.md); semuanya belum diuji di VM nyata. Yang belum: ide tambahan di bagian bawah.
 
 Urutan dikerjakan bersamaan nanti. Setiap butir tetap mengikuti aturan CLAUDE.md (tanpa interpolasi shell, test negatif lintas user, audit log, pesan error Indonesia).
 

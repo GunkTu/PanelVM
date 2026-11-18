@@ -138,7 +138,9 @@ export function previewRoutes(app: FastifyInstance, ctx: Ctx): void {
     const vm = access(req);
     if (!previews.enabled) return { enabled: false, maxPerVm: MAX_PREVIEWS_PER_VM, items: [] };
     const rows = db
-      .prepare('SELECT * FROM previews WHERE vm_id = ? AND expires_at > ? ORDER BY created_at DESC')
+      .prepare(
+        'SELECT * FROM previews WHERE vm_id = ? AND expires_at > ? AND purpose IS NULL ORDER BY created_at DESC',
+      )
       .all(vm.id, Date.now()) as PreviewRow[];
     return {
       enabled: true,
@@ -172,7 +174,7 @@ export function previewRoutes(app: FastifyInstance, ctx: Ctx): void {
       }
       const now = Date.now();
       const active = db
-        .prepare('SELECT port FROM previews WHERE vm_id = ? AND expires_at > ?')
+        .prepare('SELECT port FROM previews WHERE vm_id = ? AND expires_at > ? AND purpose IS NULL')
         .all(vm.id, now) as { port: number }[];
       if (active.some((a) => a.port === body.port)) {
         throw new AppError(

@@ -8,12 +8,29 @@ import {
   MAX_PREVIEW_PASSWORD,
   readCookie,
   signAccess,
+  signTicket,
   verifyAccess,
+  verifyTicket,
 } from './access.js';
 import type { PreviewRow } from './service.js';
 
 /** Path milik panel di host preview (form kata sandi). Aplikasi pengguna tidak boleh memakai path ini. */
 export const GATE_LOGIN_PATH = '/__pv/login';
+/** Penukaran tiket panel -> cookie akses (preview milik sistem seperti phpMyAdmin). */
+export const GATE_TICKET_PATH = '/__pv/ticket';
+export const TICKET_TTL_MS = 60_000;
+
+/** Buat URL pembuka sekali pakai untuk preview milik sistem. */
+export function ticketUrl(ctx: Ctx, preview: PreviewRow): string {
+  const exp = Date.now() + TICKET_TTL_MS;
+  const token = signTicket(
+    ctx.previews.accessKey,
+    preview.id,
+    exp,
+    Buffer.from(crypto.getRandomValues(new Uint8Array(12))).toString('base64url'),
+  );
+  return `${ctx.previews.urlFor(preview.subdomain)}${GATE_TICKET_PATH}?t=${encodeURIComponent(token)}`;
+}
 const ACCESS_COOKIE_MAX_MS = 12 * 60 * 60 * 1000;
 const MAX_LOGIN_BODY = 4096;
 
@@ -139,13 +156,50 @@ export async function passwordGate(
 ): Promise<boolean> {
   if (preview.access !== 'password') return true;
   const path = (req.url ?? '/').split('?')[0];
+  // Preview milik sistem (tanpa kata sandi): hanya bisa dibuka dengan tiket dari panel.
+  if (!preview.password_hash && path === GATE_TICKET_PATH) {
+    const t = verifyTicket(
+      ctx.previews.accessKey,
+      new URL(req.url ?? '/', 'http://x').searchParams.get('t'),
+      preview.id,
+      Date.now(),
+    );
+    if (!t || !ctx.previews.consumeTicket(t.nonce, t.expMs)) {
+      send(
+        res,
+        401,
+        message(
+          'Tiket tidak berlaku',
+          'Tiket pembuka sudah dipakai atau kedaluwarsa. Kembali ke panel lalu klik tombol buka lagi.',
+        ),
+      );
+      return false;
+    }
+    const exp = Math.min(preview.expires_at, Date.now() + ACCESS_COOKIE_MAX_MS);
+    const token = signAccess(ctx.previews.accessKey, preview.id, preview.access_version, exp);
+    const maxAge = Math.max(1, Math.floor((exp - Date.now()) / 1000));
+    const cookie = `${ACCESS_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secureCookies(ctx) ? '; Secure' : ''}`;
+    send(res, 303, '', { location: '/', 'set-cookie': cookie });
+    return false;
+  }
+  if (path === GATE_LOGIN_PATH && !preview.password_hash) {
+    send(
+      res,
+      401,
+      message(
+        'Dibuka lewat panel',
+        'Halaman ini hanya bisa dibuka dari tombol di panel. Kembali ke panel lalu klik tombolnya.',
+      ),
+    );
+    return false;
+  }
   if (path === GATE_LOGIN_PATH) {
     await handleLogin(ctx, req, res, preview);
     return false;
   }
   const token = readCookie(req.headers.cookie, ACCESS_COOKIE);
   if (
-    preview.password_hash &&
+    (preview.password_hash || preview.purpose === 'pma') &&
     verifyAccess(ctx.previews.accessKey, token, preview.id, preview.access_version, Date.now())
   ) {
     return true;
@@ -159,7 +213,16 @@ export async function passwordGate(
     (req.method === 'GET' || req.method === 'HEAD') &&
     String(req.headers.accept ?? '').includes('text/html')
   ) {
-    send(res, 401, loginHtml(safeNext(req.url)));
+    send(
+      res,
+      401,
+      preview.password_hash
+        ? loginHtml(safeNext(req.url))
+        : message(
+            'Dibuka lewat panel',
+            'Halaman ini hanya bisa dibuka dari tombol di panel. Kembali ke panel lalu klik tombolnya.',
+          ),
+    );
   } else {
     send(
       res,

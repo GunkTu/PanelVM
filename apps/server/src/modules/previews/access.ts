@@ -81,6 +81,34 @@ export function verifyAccess(
   return id === previewId && Number(ver) === version && Number(exp) > now;
 }
 
+/**
+ * Tiket sekali pakai dari panel untuk membuka preview milik sistem (mis. phpMyAdmin) di host preview, yang
+ * berbeda origin dari panel sehingga cookie sesi panel tidak terkirim. Berlaku singkat, terikat ke satu preview,
+ * dan nonce-nya hanya boleh ditukar sekali (lihat PreviewManager.consumeTicket).
+ */
+export function signTicket(key: Buffer, previewId: string, expMs: number, nonce: string): string {
+  const payload = `t.${previewId}.${expMs}.${nonce}`;
+  return `${payload}.${mac(key, payload)}`;
+}
+
+export function verifyTicket(
+  key: Buffer,
+  token: string | null | undefined,
+  previewId: string,
+  now: number,
+): { nonce: string; expMs: number } | null {
+  if (!token || token.length > 300) return null;
+  const i = token.lastIndexOf('.');
+  if (i < 0) return null;
+  const payload = token.slice(0, i);
+  const given = Buffer.from(token.slice(i + 1));
+  const want = Buffer.from(mac(key, payload));
+  if (given.length !== want.length || !timingSafeEqual(given, want)) return null;
+  const [tag, id, exp, nonce] = payload.split('.');
+  if (tag !== 't' || id !== previewId || !nonce || !(Number(exp) > now)) return null;
+  return { nonce, expMs: Number(exp) };
+}
+
 export function readCookie(header: string | undefined, name: string): string | undefined {
   if (!header) return undefined;
   for (const part of header.split(';')) {

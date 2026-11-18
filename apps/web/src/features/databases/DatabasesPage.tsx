@@ -23,6 +23,7 @@ import type { Credentials } from '../../lib/types';
 import { uploadRaw } from '../../lib/upload';
 import { RISK_LABEL, scanFile, type SqlFinding } from '../../lib/sqlscan';
 import { useVmId } from '../layout/useVmId';
+import { PhpMyAdminCard } from './PhpMyAdminCard';
 
 type EngineKey = 'mysql' | 'postgres';
 interface EngineInfo {
@@ -463,6 +464,8 @@ export function DatabasesPage() {
           )}
         </div>
       )}
+
+      {mysql?.managed && engine === 'mysql' && <PhpMyAdminCard vmId={vmId} />}
 
       {mysql?.managed && (
         <>

@@ -42,6 +42,8 @@ export interface PreviewRow {
   access: 'public' | 'password';
   password_hash: string | null;
   access_version: number;
+  /** NULL = preview buatan pengguna; 'pma' = milik sistem (phpMyAdmin), dibuka lewat tiket panel. */
+  purpose: string | null;
 }
 
 const B32 = 'abcdefghijklmnopqrstuvwxyz234567';
@@ -90,6 +92,16 @@ export class PreviewManager {
   allowLogin(previewId: string, ip: string): boolean {
     const w = 10 * 60_000;
     return this.attempts.allow(`${previewId}|${ip}`, 8, w) && this.attempts.allow(previewId, 60, w);
+  }
+
+  private readonly usedTickets = new Map<string, number>();
+
+  /** Tukar tiket: true hanya untuk kali pertama nonce dipakai. Nonce kedaluwarsa dibuang sekalian. */
+  consumeTicket(nonce: string, expMs: number, now = Date.now()): boolean {
+    for (const [n, exp] of this.usedTickets) if (exp <= now) this.usedTickets.delete(n);
+    if (this.usedTickets.has(nonce)) return false;
+    this.usedTickets.set(nonce, expMs);
+    return true;
   }
 
   /** Batas tebakan alias: setiap IP hanya boleh membuka sejumlah alamat preview tak dikenal per menit. */

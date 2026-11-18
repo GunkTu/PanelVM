@@ -149,6 +149,18 @@ npm run e2e                                          # E2E Playwright (butuh Chr
 - **E2E**: `PLAYWRIGHT_CHROMIUM_PATH=/path/ke/chromium npm run e2e` (opsional; bila kosong Playwright memakai browsernya sendiri). Spesifikasi auth dan isolasi memakai server SSH palsu; spesifikasi `real-vm` ikut jalan bila variabel `PANEL_TEST_*` di atas diset.
 - Test negatif lintas akun (IDOR) untuk semua endpoint modul selalu jalan tanpa VM nyata.
 
+## Fitur tambahan: deploy, jadwal, aplikasi, phpMyAdmin
+
+Semua fitur di bagian ini diuji dengan SSH dan Proxmox **tiruan**; **[belum diuji di VM nyata]**. Uji satu per satu di VM percobaan sebelum diandalkan.
+
+- **Siapkan database untuk situs** (Situs Web): membuat database + user khusus (password acak, tampil sekali) dan mengisi `DB_*` di `.env` (Laravel; situs PHP biasa hanya bila `.env` sudah ada). Nama dibuat dari domain, bisa diubah.
+- **Peringatan SQL berbahaya**: file `.sql` dipindai di browser sebelum diunggah. Bila berisi `DROP DATABASE/TABLE`, `TRUNCATE`, `CREATE DATABASE`, atau `USE`, pengguna harus mengetik nama database. Server juga mencatat jenis perintah itu di audit log dan memberi tahu admin untuk perintah yang menghapus data.
+- **Jadwal & Worker**: cron di `/etc/cron.d/panelvm-<nama>` dan worker (mis. `queue:work`) sebagai unit systemd `panelvm-worker-<nama>.service`, semuanya sebagai `www-data`. Perintah dibatasi karakter aman (tanpa tanda kutip, `$`, `;`, `|`, `&`, `<`, `>`); untuk perintah rumit, buat skrip lalu panggil skripnya. Butuh paket `cron` (menu Aplikasi) untuk cron.
+- **App Node/Python**: service systemd `panelvm-app-<nama>.service` + Nginx sebagai reverse proxy ke `127.0.0.1:<port>` (3001-3999, otomatis). Variabel `PORT` disediakan; variabel lain lewat `/var/www/<domain>/.env`. Hanya Nginx (Apache belum didukung). Butuh Node.js atau Python dari menu Aplikasi (versi mengikuti repositori OS).
+- **phpMyAdmin**: dipasang di `/opt/phpmyadmin` (unduhan resmi + verifikasi SHA-256), dilayani Nginx **hanya di 127.0.0.1:8091 VM**, dibuka lewat tombol di halaman Database (tiket sekali pakai 60 detik, cookie akses 12 jam di host preview). Login memakai user database biasa; `root` dan password kosong dilarang. Syarat: Nginx, PHP-FPM, curl, `PREVIEW_BASE_DOMAIN`, dan modul Preview Web aktif untuk VM. URL unduhan memakai alamat "latest" resmi phpMyAdmin dan struktur folder rilis dideteksi otomatis; **periksa hasil pemasangan pertama dengan teliti**.
+- **Mode Maintenance** (admin, menu Maintenance): non-admin melihat layar pemeliharaan dan API menjawab 503; admin tetap bekerja. Tersimpan di database sehingga bertahan saat panel di-restart. Saat panel benar-benar mati (restart), Nginx Proxy Manager menjawab 502; untuk halaman cantik pada kondisi itu, atur `error_page 502 503 504` di NPM (belum disiapkan di repo).
+- **Batas situs per client** (Kelola Pengguna, kolom Situs web) dan **sesi login 24 jam** (idle dan absolut).
+
 ## Yang masih harus diverifikasi di lingkungan nyata
 
 Daftar jujur hal yang **belum** teruji di lingkungan pengembangan:
