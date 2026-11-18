@@ -21,6 +21,7 @@ import { AppError } from './errors.js';
 import { JobService } from './modules/jobs/service.js';
 import { isPreviewHost, previewHook } from './modules/previews/proxy.js';
 import { previewRoutes } from './modules/previews/routes.js';
+import { maintenanceHook, maintenanceRoutes } from './modules/maintenance/service.js';
 import { powerRoutes } from './modules/proxmox/power.js';
 import { proxmoxRoutes } from './modules/proxmox/routes.js';
 import { PreviewManager } from './modules/previews/service.js';
@@ -126,6 +127,7 @@ export async function buildApp(env: Env, opts: BuildOptions = {}): Promise<Built
   // Host preview diambil alih SEBELUM hook auth/CSRF/Origin: itu trafik aplikasi pengguna, bukan API panel.
   app.addHook('onRequest', previewHook(ctx));
   app.addHook('onRequest', authHook(ctx));
+  app.addHook('onRequest', maintenanceHook(ctx));
 
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof AppError)
@@ -174,6 +176,7 @@ export async function buildApp(env: Env, opts: BuildOptions = {}): Promise<Built
   previewRoutes(app, ctx);
   proxmoxRoutes(app, ctx);
   powerRoutes(app, ctx);
+  maintenanceRoutes(app, ctx);
 
   // Produksi: sajikan SPA dari origin yang sama dengan API (tanpa CORS).
   const webDist = join(dirname(fileURLToPath(import.meta.url)), '../../web/dist');

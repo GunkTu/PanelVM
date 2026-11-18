@@ -3,6 +3,7 @@ import {
   Activity,
   Bell,
   CheckCheck,
+  Construction,
   ChevronRight,
   Cloud,
   Database,
@@ -61,6 +62,7 @@ const PAGE_TITLES: Record<string, string> = {
 const ADMIN_TITLES: Record<string, string> = {
   '/admin/vms': 'Kelola VM',
   '/admin/users': 'Kelola Pengguna',
+  '/admin/maintenance': 'Mode Maintenance',
   '/admin/audit': 'Audit Log',
   '/admin/previews': 'Preview Live',
   '/admin/proxmox': 'Proxmox',
@@ -258,6 +260,7 @@ export function AppLayout() {
           { to: '/admin/users', label: 'Kelola Pengguna', icon: Users },
           { to: '/admin/previews', label: 'Preview Live', icon: Radio },
           { to: '/admin/proxmox', label: 'Proxmox', icon: Cloud },
+          { to: '/admin/maintenance', label: 'Maintenance', icon: Construction },
           { to: '/admin/audit', label: 'Audit Log', icon: ScrollText },
         ]
       : [];
