@@ -25,6 +25,10 @@ const installBody = z.object({
     'mysql',
     'postgresql',
     'redis',
+    'cron',
+    'nodejs',
+    'python',
+    'fail2ban',
   ]),
   version: z.string().max(8).optional(),
   extensions: z.array(z.enum(PHP_OPTIONAL_EXTENSIONS)).max(10).optional(),
@@ -74,7 +78,17 @@ export function softwareRoutes(app: FastifyInstance, ctx: Ctx): void {
         if (
           row &&
           !row.available &&
-          ['mariadb', 'mysql', 'redis', 'nginx', 'apache'].includes(row.id)
+          [
+            'mariadb',
+            'mysql',
+            'redis',
+            'nginx',
+            'apache',
+            'cron',
+            'nodejs',
+            'python',
+            'fail2ban',
+          ].includes(row.id)
         ) {
           throw new AppError(
             409,

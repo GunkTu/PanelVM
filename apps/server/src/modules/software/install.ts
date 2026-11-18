@@ -139,6 +139,34 @@ export function buildPlan(
         verifyPackages: ['redis-server'],
       };
 
+    case 'cron':
+      return {
+        steps: [aptUpdate(), aptInstall('Pasang cron', ['cron']), enableService('cron')],
+        verifyPackages: ['cron'],
+      };
+
+    case 'nodejs':
+      return {
+        steps: [aptUpdate(), aptInstall('Pasang Node.js dan npm', CATALOG.nodejs.packages)],
+        verifyPackages: ['nodejs', 'npm'],
+      };
+
+    case 'python':
+      return {
+        steps: [aptUpdate(), aptInstall('Pasang Python 3', CATALOG.python.packages)],
+        verifyPackages: ['python3', 'python3-venv', 'python3-pip'],
+      };
+
+    case 'fail2ban':
+      return {
+        steps: [
+          aptUpdate(),
+          aptInstall('Pasang Fail2ban', ['fail2ban']),
+          enableService('fail2ban'),
+        ],
+        verifyPackages: ['fail2ban'],
+      };
+
     case 'mariadb':
       return {
         steps: [

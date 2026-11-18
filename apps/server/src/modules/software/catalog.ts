@@ -12,7 +12,11 @@ export type ItemId =
   | 'mariadb'
   | 'mysql'
   | 'postgresql'
-  | 'redis';
+  | 'redis'
+  | 'cron'
+  | 'nodejs'
+  | 'python'
+  | 'fail2ban';
 
 export interface CatalogItem {
   id: ItemId;
@@ -96,6 +100,36 @@ export const CATALOG: Record<ItemId, CatalogItem> = {
     description: 'Cache dan antrean (queue) untuk Laravel.',
     packages: ['redis-server'],
     service: 'redis-server',
+  },
+  cron: {
+    id: 'cron',
+    title: 'Cron',
+    description:
+      'Penjadwal tugas. Dibutuhkan untuk menu Jadwal & Worker (mis. Laravel Scheduler). Ada di sebagian besar VM, tetapi tidak di image minimal.',
+    packages: ['cron'],
+    service: 'cron',
+  },
+  nodejs: {
+    id: 'nodejs',
+    title: 'Node.js + npm',
+    description:
+      'Runtime JavaScript untuk menu App Node/Python. Versi mengikuti repositori OS (bisa lebih lama dari versi terbaru); bila butuh versi tertentu, pasang manual lewat terminal.',
+    packages: ['nodejs', 'npm'],
+  },
+  python: {
+    id: 'python',
+    title: 'Python 3 (venv + pip)',
+    description:
+      'Python 3 dengan virtualenv dan pip untuk Flask, Django, FastAPI di menu App Node/Python.',
+    packages: ['python3', 'python3-venv', 'python3-pip'],
+  },
+  fail2ban: {
+    id: 'fail2ban',
+    title: 'Fail2ban',
+    description:
+      'Memblokir sementara IP yang berulang kali gagal login SSH. Dipasang dengan pengaturan bawaan Debian/Ubuntu (SSH dilindungi).',
+    packages: ['fail2ban'],
+    service: 'fail2ban',
   },
 };
 

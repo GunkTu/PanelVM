@@ -35,6 +35,23 @@ describe('buildPlan', () => {
     expect(() => buildPlan({ item: 'nginx' }, parseOsRelease('ID=alpine'), ctx)).toThrow(AppError);
   });
 
+  it('cron, Node.js, Python, Fail2ban: paket tetap dari katalog, layanan diaktifkan bila ada', () => {
+    const install = (item: 'cron' | 'nodejs' | 'python' | 'fail2ban') =>
+      buildPlan({ item }, ubuntu, ctx).steps.find((s) => s.argv[1] === 'install')!.argv;
+    expect(install('cron')).toContain('cron');
+    expect(install('nodejs')).toEqual(expect.arrayContaining(['nodejs', 'npm']));
+    expect(install('python')).toEqual(
+      expect.arrayContaining(['python3', 'python3-venv', 'python3-pip']),
+    );
+    expect(install('fail2ban')).toContain('fail2ban');
+    expect(buildPlan({ item: 'cron' }, ubuntu, ctx).steps.at(-1)!.argv).toEqual([
+      'systemctl',
+      'enable',
+      '--now',
+      'cron',
+    ]);
+  });
+
   it('PHP: hanya versi yang ditemukan di repositori VM, format ketat', () => {
     for (const v of ['8.3; rm -rf /', '$(id)', '8.9', '8', '', '../../x', "8.3'"]) {
       expect(() => buildPlan({ item: 'php', version: v }, ubuntu, ctx), v).toThrow(AppError);
