@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
+import { AccountPage } from './features/account/AccountPage';
 import { AdminAuditPage } from './features/admin/AdminAuditPage';
 import { AdminMaintenancePage } from './features/admin/AdminMaintenancePage';
 import { AdminPreviewsPage } from './features/admin/AdminPreviewsPage';
@@ -42,6 +43,7 @@ export function App() {
         >
           <Route index element={<Navigate to="/vms" replace />} />
           <Route path="/vms" element={<VmListPage />} />
+          <Route path="/account" element={<AccountPage />} />
           <Route
             path="/vms/:vmId/terminal"
             element={

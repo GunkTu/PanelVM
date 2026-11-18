@@ -19,6 +19,7 @@ import {
   Server,
   Settings2,
   SquareTerminal,
+  UserRound,
   Users,
   type LucideIcon,
 } from 'lucide-react';
@@ -62,6 +63,7 @@ const PAGE_TITLES: Record<string, string> = {
 const ADMIN_TITLES: Record<string, string> = {
   '/admin/vms': 'Kelola VM',
   '/admin/users': 'Kelola Pengguna',
+  '/account': 'Akun Saya',
   '/admin/maintenance': 'Mode Maintenance',
   '/admin/audit': 'Audit Log',
   '/admin/previews': 'Preview Live',
@@ -330,6 +332,11 @@ export function AppLayout() {
           />
           <NavGroup title="VM ini" items={vmModules} onNavigate={closeMenu} />
           <NavGroup title="Admin" items={adminItems} onNavigate={closeMenu} />
+          <NavGroup
+            title="Akun"
+            items={[{ to: '/account', label: 'Akun Saya', icon: UserRound }]}
+            onNavigate={closeMenu}
+          />
         </nav>
 
         <div className="border-t border-white/10 p-4">
