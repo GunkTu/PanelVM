@@ -13,6 +13,7 @@ import { privOpts, sshTargetFor, withVm } from '../vms/service.js';
 import { MysqlDriver } from './mysql.js';
 import { PostgresDriver } from './postgres.js';
 import type { DbDriver, Engine } from './types.js';
+import { SqlScanner } from './sqlscan.js';
 import { assertRoleName, dbIdentifier, generateDbPassword } from './validate.js';
 
 const vmParams = z.object({ vmId: z.string().uuid() });
@@ -282,9 +283,12 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
           `File SQL melebihi batas ${ctx.env.MAX_UPLOAD_MB} MB. Gunakan terminal untuk file yang lebih besar.`,
         );
       let received = 0;
+      const scanner = new SqlScanner();
+      const decoder = new TextDecoder();
       const limiter = new Transform({
         transform(chunk: Buffer, _e, cb) {
           received += chunk.length;
+          scanner.push(decoder.decode(chunk, { stream: true }));
           if (received > maxBytes)
             return cb(
               new AppError(
@@ -308,11 +312,17 @@ export function databaseRoutes(app: FastifyInstance, ctx: Ctx): void {
           await d.importSql(database, limiter);
         });
       } catch (e) {
-        rec(req, vm, userId, 'import', database, 'fail', { bytes: received });
+        rec(req, vm, userId, 'import', database, 'fail', {
+          bytes: received,
+          risks: scanner.result().risks,
+        });
         throw e;
       }
-      rec(req, vm, userId, 'import', database, 'ok', { bytes: received });
-      return { ok: true, bytes: received };
+      const { risks } = scanner.result();
+      rec(req, vm, userId, 'import', database, 'ok', { bytes: received, risks });
+      if (risks.some((r) => r === 'drop_database' || r === 'drop_table' || r === 'truncate'))
+        risky(vm, emailOf(userId), `mengimpor SQL berisi ${risks.join(', ')} ke ${database}`);
+      return { ok: true, bytes: received, risks };
     },
   );
 

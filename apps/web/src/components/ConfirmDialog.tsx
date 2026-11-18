@@ -57,7 +57,7 @@ function ConfirmBody({
         >
           <TriangleAlert className="h-5 w-5" />
         </span>
-        <p className="pt-1">{message}</p>
+        <p className="pt-1 whitespace-pre-line">{message}</p>
       </div>
       {requireText && (
         <div className="mt-4">

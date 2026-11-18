@@ -20,6 +20,7 @@ import type { Job } from '../../lib/types';
 import { uploadRaw } from '../../lib/upload';
 import { useVmId } from '../layout/useVmId';
 import { LaravelGuide } from './LaravelGuide';
+import { SiteDatabaseDialog } from './SiteDatabaseDialog';
 
 interface Site {
   id: string;
@@ -74,7 +75,7 @@ const ARTISAN = [
 const RISKY_ARTISAN = new Set(['migrate', 'db:seed', 'key:generate']);
 
 type Dialog = {
-  kind: 'deploy' | 'artisan' | 'php' | 'delete' | 'docroot' | 'default';
+  kind: 'deploy' | 'artisan' | 'php' | 'delete' | 'docroot' | 'default' | 'database';
   site: Site;
 } | null;
 
@@ -424,6 +425,13 @@ export function SitesPage() {
                   {s.isDefault ? 'Lepas situs utama' : 'Jadikan situs utama'}
                 </Button>
               )}
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setDialog({ kind: 'database', site: s })}
+              >
+                Siapkan database
+              </Button>
               {s.envPath && (
                 <ButtonLink
                   variant="secondary"
@@ -871,6 +879,14 @@ export function SitesPage() {
           </p>
         )}
       </Modal>
+
+      <SiteDatabaseDialog
+        key={dialog?.kind === 'database' ? dialog.site.id : 'closed'}
+        open={dialog?.kind === 'database'}
+        vmId={vmId}
+        site={site}
+        onClose={closeDialog}
+      />
 
       <Modal
         open={dialog?.kind === 'php'}

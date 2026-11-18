@@ -21,6 +21,7 @@ import { api } from '../../lib/api';
 import { formatBytes } from '../../lib/format';
 import type { Credentials } from '../../lib/types';
 import { uploadRaw } from '../../lib/upload';
+import { RISK_LABEL, scanFile, type SqlFinding } from '../../lib/sqlscan';
 import { useVmId } from '../layout/useVmId';
 
 type EngineKey = 'mysql' | 'postgres';
@@ -239,6 +240,9 @@ export function DatabasesPage() {
   const [query, setQuery] = useState<string | null | false>(false);
   const [importDb, setImportDb] = useState<string | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
+  const [riskyImport, setRiskyImport] = useState<{ file: File; findings: SqlFinding[] } | null>(
+    null,
+  );
   const fileInput = useRef<HTMLInputElement>(null);
 
   const refresh = () => qc.invalidateQueries({ queryKey: ['db-overview', vmId] });
@@ -318,8 +322,31 @@ export function DatabasesPage() {
     onError: onErr,
   });
 
+  /** Pindai dulu: file berisi DROP/TRUNCATE/dll diminta konfirmasi (ketik nama database) sebelum diunggah. */
+  const startImport = async (f: File | undefined) => {
+    if (!f || !importDb) return;
+    let findings: SqlFinding[] = [];
+    try {
+      findings = await scanFile(f);
+    } catch {
+      // gagal membaca untuk dipindai: lanjutkan tanpa peringatan (server tetap mencatat di audit)
+    }
+    if (findings.length > 0) {
+      setRiskyImport({ file: f, findings });
+      return;
+    }
+    await doImport(f);
+  };
+
+  const cancelImport = () => {
+    setRiskyImport(null);
+    setImportDb(null);
+    if (fileInput.current) fileInput.current.value = '';
+  };
+
   const doImport = async (f: File | undefined) => {
     if (!f || !importDb) return;
+    setRiskyImport(null);
     setProgress(0);
     try {
       await uploadRaw(
@@ -494,7 +521,16 @@ export function DatabasesPage() {
             type="file"
             accept=".sql,text/plain"
             hidden
-            onChange={(e) => void doImport(e.target.files?.[0])}
+            onChange={(e) => void startImport(e.target.files?.[0])}
+          />
+          <ConfirmDialog
+            open={!!riskyImport}
+            title="File SQL ini berisi perintah berbahaya"
+            message={`File ${riskyImport?.file.name ?? ''} akan dijalankan di database "${importDb ?? ''}" dan berisi:\n${(riskyImport?.findings ?? []).map((f) => `- ${RISK_LABEL[f.risk]}: ${f.snippet}`).join('\n')}\n\nData yang ada bisa terhapus dan tidak bisa dikembalikan. Pastikan sudah punya backup, dan JANGAN jalankan ulang di situs yang sudah dipakai. Ketik nama database untuk melanjutkan.`}
+            confirmLabel="Tetap impor"
+            requireText={importDb ?? undefined}
+            onConfirm={() => void doImport(riskyImport?.file)}
+            onCancel={cancelImport}
           />
           {progress !== null && (
             <p className="mt-2 text-sm text-slate-600" role="status">
