@@ -20,6 +20,8 @@ import { PreviewsPage } from './features/previews/PreviewsPage';
 import { ServicesPage } from './features/services/ServicesPage';
 import { SitesPage } from './features/sites/SitesPage';
 import { SoftwarePage } from './features/software/SoftwarePage';
+import { AppsPage } from './features/tasks/AppsPage';
+import { TasksPage } from './features/tasks/TasksPage';
 import { VmListPage } from './features/vms/VmListPage';
 
 // xterm cukup besar; muat hanya saat halaman terminal dibuka.
@@ -57,6 +59,8 @@ export function App() {
           <Route path="/vms/:vmId/software" element={<SoftwarePage />} />
           <Route path="/vms/:vmId/sites" element={<SitesPage />} />
           <Route path="/vms/:vmId/previews" element={<PreviewsPage />} />
+          <Route path="/vms/:vmId/tasks" element={<TasksPage />} />
+          <Route path="/vms/:vmId/apps" element={<AppsPage />} />
           <Route path="/vms/:vmId/monitoring" element={<MonitoringPage />} />
           <Route path="/vms/:vmId/services" element={<ServicesPage />} />
           <Route

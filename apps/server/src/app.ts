@@ -28,6 +28,7 @@ import { PreviewManager } from './modules/previews/service.js';
 import { VmWatcher } from './modules/vms/watcher.js';
 import { SshPool } from './ssh/pool.js';
 import { cacheControlFor, isSpaRoute } from './spa.js';
+import { taskRoutes } from './modules/tasks/routes.js';
 import { siteDbRoutes } from './modules/sites/dbsetup.js';
 import { siteRoutes } from './modules/sites/routes.js';
 import { softwareRoutes } from './modules/software/routes.js';
@@ -175,6 +176,7 @@ export async function buildApp(env: Env, opts: BuildOptions = {}): Promise<Built
   softwareRoutes(app, ctx);
   siteRoutes(app, ctx);
   siteDbRoutes(app, ctx);
+  taskRoutes(app, ctx);
   previewRoutes(app, ctx);
   proxmoxRoutes(app, ctx);
   powerRoutes(app, ctx);

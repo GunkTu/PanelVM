@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Activity,
   Bell,
+  CalendarClock,
   CheckCheck,
   Construction,
   ChevronRight,
@@ -15,6 +16,7 @@ import {
   Menu,
   Package,
   Radio,
+  Rocket,
   ScrollText,
   Server,
   Settings2,
@@ -57,6 +59,8 @@ const PAGE_TITLES: Record<string, string> = {
   software: 'Aplikasi',
   sites: 'Situs Web',
   previews: 'Preview Web',
+  tasks: 'Jadwal & Worker',
+  apps: 'App Node/Python',
   monitoring: 'Monitoring',
   services: 'Service',
 };
@@ -241,6 +245,8 @@ export function AppLayout() {
             ['software', 'Aplikasi', Package],
             ['sites', 'Situs Web', Globe],
             ['previews', 'Preview Web', Eye],
+            ['tasks', 'Jadwal & Worker', CalendarClock],
+            ['apps', 'App Node/Python', Rocket],
             ['monitoring', 'Monitoring', Activity],
             ['services', 'Service', Settings2],
           ] as const
@@ -248,8 +254,12 @@ export function AppLayout() {
           .filter(
             ([page]) =>
               vm.data.modules[
-                ({ databases: 'database' } as Record<string, keyof Vm['modules']>)[page] ??
-                  (page as keyof Vm['modules'])
+                (
+                  { databases: 'database', tasks: 'sites', apps: 'sites' } as Record<
+                    string,
+                    keyof Vm['modules']
+                  >
+                )[page] ?? (page as keyof Vm['modules'])
               ],
           )
           .map(([page, label, icon]) => ({ to: `/vms/${vmId}/${page}`, label, icon }))
