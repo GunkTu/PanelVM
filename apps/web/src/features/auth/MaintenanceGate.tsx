@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Construction } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { api } from '../../lib/api';
 import type { MaintenanceInfo } from '../admin/AdminMaintenancePage';
 import { useMeQuery } from './AuthContext';
@@ -34,9 +34,6 @@ export function MaintenanceGate({ children }: { children: ReactNode }) {
         Halaman ini akan terbuka otomatis begitu pemeliharaan selesai. Situs web Anda di VM tetap
         berjalan seperti biasa.
       </p>
-      <Link to="/login" className="mt-8 text-xs text-slate-400 hover:text-slate-600">
-        Masuk sebagai admin
-      </Link>
     </main>
   );
 }

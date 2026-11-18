@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { call, login, makeApp, seedUser, type Client } from './helpers.js';
+import { call, login, makeApp, PASSWORD, seedUser, type Client } from './helpers.js';
 
 const built = await makeApp();
 const { app, ctx } = built;
@@ -48,6 +48,18 @@ describe('mode maintenance', () => {
     expect((await call(app, null, 'GET', '/api/health')).statusCode).toBe(200);
     const pub = (await call(app, null, 'GET', '/api/maintenance')).json();
     expect(pub).toMatchObject({ enabled: true, message: 'Sedang update versi baru.' });
+  });
+
+  it('client tidak bisa login saat maintenance (password benar pun ditolak 503), admin tetap bisa', async () => {
+    const tryLogin = (email: string, password: string) =>
+      call(app, null, 'POST', '/api/auth/login', { email, password });
+    const c = await tryLogin('klien@contoh.com', PASSWORD);
+    expect(c.statusCode).toBe(503);
+    expect(c.json().error).toBe('maintenance');
+    expect(c.headers['set-cookie']).toBeUndefined();
+    // password salah tetap dijawab seperti biasa (tidak membocorkan apa pun)
+    expect((await tryLogin('klien@contoh.com', 'salah-salah-salah')).statusCode).toBe(401);
+    expect((await tryLogin('admin@contoh.com', PASSWORD)).statusCode).toBe(200);
   });
 
   it('status tersimpan di database (bertahan melewati restart)', () => {

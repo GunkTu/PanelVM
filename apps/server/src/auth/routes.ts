@@ -12,6 +12,7 @@ import {
   requireStage,
   setSessionCookie,
 } from './plugin.js';
+import { loadMaintenance } from '../modules/maintenance/service.js';
 import { burnPasswordTime, hashPassword, passwordSchema, verifyPassword } from './passwords.js';
 import {
   consumeRecoveryCode,
@@ -132,6 +133,12 @@ export function authRoutes(app: FastifyInstance, ctx: Ctx): void {
     db.prepare('UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = ?').run(
       user.id,
     );
+    // Saat maintenance, hanya admin yang boleh masuk. Dicek setelah password benar agar tidak membocorkan
+    // apakah sebuah email terdaftar.
+    if (user.role !== 'admin') {
+      const m = loadMaintenance(ctx);
+      if (m.enabled) throw new AppError(503, 'maintenance', m.message);
+    }
     const stage = user.totp_enabled ? 'pending_2fa' : 'pending_setup';
     const { token, id } = sessions.create(user.id, stage, req.ip, ua(req));
     audit.record({ userId: user.id, ip: req.ip, action: 'auth.password', result: 'ok' });
